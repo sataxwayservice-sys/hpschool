@@ -110,13 +110,6 @@ if ($currentSchoolId > 0) {
     $dueStudents = fetchAll($dueStudentsQuery . " LIMIT 10");
 }
 
-// Active reminders count (for admins)
-$activeReminders = 0;
-if ($currentUser['role'] == 'admin') {
-    $result = fetchOne("SELECT COUNT(*) as total FROM student_reminders WHERE is_resolved = 0");
-    $activeReminders = $result['total'] ?? 0;
-}
-
 $adminPortalTiles = [];
 if (($currentUser['role'] ?? '') === 'admin') {
     if (function_exists('hasRolePermissionForSchool') && hasRolePermissionForSchool('school_settings', 'view', $currentSchoolId, 'admin')) {
@@ -428,24 +421,6 @@ include '../../includes/header.php';
         </div>
     </div>
 
-    <?php if ($currentUser['role'] == 'admin'): ?>
-    <div class="col-md-3 mb-4">
-        <div class="card dashboard-card stat-card-danger">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="text-white-50 mb-2">Active Reminders</h6>
-                        <h2 class="mb-0"><?php echo $activeReminders; ?></h2>
-                        <small class="text-white-50">Unresolved tasks</small>
-                    </div>
-                    <div class="card-icon">
-                        <i class="bi bi-bell-fill text-white"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <?php endif; ?>
 </div>
 
 <!-- Quick Actions -->
