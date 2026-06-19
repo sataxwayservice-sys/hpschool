@@ -117,6 +117,10 @@ require_once BASE_PATH . '/includes/functions.php';
 require_once BASE_PATH . '/includes/school_registration.php';
 require_once BASE_PATH . '/includes/auth.php';
 
+if (function_exists('ensureStudentSchema')) {
+    ensureStudentSchema();
+}
+
 if (function_exists('trackNavigationHistory')) {
     trackNavigationHistory();
 }

@@ -39,6 +39,9 @@ if (!function_exists('studentPortalEnsureSchema')) {
 
         $ensureColumn('users', 'student_id', "student_id int(11) DEFAULT NULL AFTER role");
         $ensureColumn('users', 'password_encrypted', "password_encrypted text DEFAULT NULL AFTER password");
+        if (function_exists('ensureStudentSchema')) {
+            ensureStudentSchema();
+        }
 
         $indexCheck = $conn->query("SHOW INDEX FROM users WHERE Key_name = 'idx_student_id'");
         if (!$indexCheck || $indexCheck->num_rows === 0) {

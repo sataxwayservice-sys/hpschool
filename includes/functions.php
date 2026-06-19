@@ -188,6 +188,43 @@ if (!function_exists('ensureSchoolSettingsSchema')) {
     }
 }
 
+if (!function_exists('ensureStudentSchema')) {
+    function ensureStudentSchema() {
+        static $checked = false;
+
+        if ($checked) {
+            return true;
+        }
+
+        $checked = true;
+
+        $conn = getDbConnection();
+        if (!$conn) {
+            return false;
+        }
+
+        $ensureColumn = function (string $table, string $column, string $ddl) use ($conn) {
+            $result = $conn->query("SHOW COLUMNS FROM `$table` LIKE '" . $conn->real_escape_string($column) . "'");
+            if (!$result || $result->num_rows === 0) {
+                if (!$conn->query("ALTER TABLE `$table` ADD COLUMN $ddl")) {
+                    error_log("Student schema update failed for $table.$column: " . $conn->error);
+                }
+            }
+        };
+
+        $ensureColumn('students', 'school_id', "school_id int(11) DEFAULT NULL AFTER student_id");
+
+        $indexCheck = $conn->query("SHOW INDEX FROM students WHERE Key_name = 'idx_student_school_id'");
+        if (!$indexCheck || $indexCheck->num_rows === 0) {
+            if (!$conn->query("ALTER TABLE students ADD KEY idx_student_school_id (school_id)")) {
+                error_log('Student schema index update failed: ' . $conn->error);
+            }
+        }
+
+        return true;
+    }
+}
+
 if (!function_exists('ensureRolePermissionsSchema')) {
     function ensureRolePermissionsSchema() {
         static $checked = false;

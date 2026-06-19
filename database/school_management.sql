@@ -114,6 +114,7 @@ INSERT INTO `sections` (`section_name`) VALUES ('A'), ('B'), ('C'), ('D');
 
 CREATE TABLE `students` (
   `student_id` int(11) NOT NULL AUTO_INCREMENT,
+  `school_id` int(11) DEFAULT NULL,
   `admission_no` varchar(50) NOT NULL UNIQUE,
   `student_name` varchar(100) NOT NULL,
   `date_of_birth` date NOT NULL,
@@ -136,6 +137,7 @@ CREATE TABLE `students` (
   UNIQUE KEY `idx_admission_no` (`admission_no`),
   KEY `fk_student_class` (`class_id`),
   KEY `fk_student_section` (`section_id`),
+  KEY `idx_student_school_id` (`school_id`),
   KEY `idx_status` (`status`),
   CONSTRAINT `fk_student_class` FOREIGN KEY (`class_id`) REFERENCES `classes` (`class_id`),
   CONSTRAINT `fk_student_section` FOREIGN KEY (`section_id`) REFERENCES `sections` (`section_id`)

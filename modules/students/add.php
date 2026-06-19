@@ -107,7 +107,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 if ($result === false) {
-                    throw new Exception('Failed to insert student record');
+                    $dbConnection = getDbConnection();
+                    $dbError = $dbConnection ? trim((string)$dbConnection->error) : '';
+                    throw new Exception(
+                        'Failed to insert student record' . (!empty($dbError) ? ': ' . $dbError : '')
+                    );
                 }
 
                 $studentId = $result['insert_id'];
