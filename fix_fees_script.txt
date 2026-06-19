@@ -1,0 +1,73 @@
+<?php
+// Build paid fees lookup for JavaScript
+$paidFeesLookup = [];
+foreach ($paidFees as $paid) {
+    if (!empty($paid['fee_month'])) {
+        $feeHeadId = $paid['fee_head_id'];
+        $year = $paid['fee_year'];
+        $month = $paid['fee_month'];
+
+        if (!isset($paidFeesLookup[$feeHeadId])) {
+            $paidFeesLookup[$feeHeadId] = [];
+        }
+        if (!isset($paidFeesLookup[$feeHeadId][$year])) {
+            $paidFeesLookup[$feeHeadId][$year] = [];
+        }
+        $paidFeesLookup[$feeHeadId][$year][] = $month;
+    }
+}
+
+$inlineScript = "
+// Calculate total
+function calculateTotal() {
+    let total = 0;
+    $('.fee-amount-input').each(function() {
+        const value = parseFloat($(this).val()) || 0;
+        total += value;
+    });
+    $('#total_amount').val('" . CURRENCY_SYMBOL . " ' + total.toFixed(2));
+}
+
+// Fill amount buttons
+$('.fill-amount').on('click', function() {
+    const target = $(this).data('target');
+    const amount = $(this).data('amount');
+    $('input[name=\"fee_amount[' + target + ']\"]').val(amount);
+    calculateTotal();
+});
+
+// Auto calculate on input
+$('.fee-amount-input').on('input', function() {
+    calculateTotal();
+});
+
+// Initial calculation
+calculateTotal();
+
+// Create paid fees lookup for JavaScript validation
+const paidFeesLookup = " . json_encode($paidFeesLookup) . ";
+
+// Validate on month/year change
+$('select[name^=\"fee_month\"], input[name^=\"fee_year\"]').on('change', function() {
+    const row = $(this).closest('tr');
+    const feeHeadId = $(this).attr('name').match(/\[(.*?)\]/)[1];
+    const month = row.find('select[name=\"fee_month[' + feeHeadId + ']\"]').val();
+    const year = row.find('input[name=\"fee_year[' + feeHeadId + ']\"]').val();
+    const amountInput = row.find('input[name=\"fee_amount[' + feeHeadId + ']\"]');
+
+    if (month && year && paidFeesLookup[feeHeadId] &&
+        paidFeesLookup[feeHeadId][year] &&
+        paidFeesLookup[feeHeadId][year].includes(month)) {
+        alert('Fee for ' + month + ' ' + year + ' has already been collected for this fee head!');
+        amountInput.val('').prop('disabled', true).css('background-color', '#f8d7da');
+        row.css('background-color', '#fff3cd');
+    } else {
+        amountInput.prop('disabled', false).css('background-color', '');
+        row.css('background-color', '');
+    }
+});
+";
+
+// Include footer
+include '../../includes/footer.php';
+?>

@@ -1,0 +1,37 @@
+======================================
+HOW TO ENABLE PHP GD EXTENSION IN XAMPP
+======================================
+
+1. STOP APACHE in XAMPP Control Panel
+
+2. OPEN php.ini file:
+   Location: C:\xampp\php\php.ini
+   OR click "Config" button next to Apache in XAMPP and select "php.ini"
+
+3. FIND THIS LINE (around line 900-950):
+   ;extension=gd
+
+4. CHANGE IT TO (remove the semicolon):
+   extension=gd
+
+5. SAVE the file
+
+6. START APACHE again
+
+7. VERIFY it's working by opening:
+   http://localhost:8080/account3/check_gd.php
+
+======================================
+TROUBLESHOOTING
+======================================
+
+If you can't find ";extension=gd", search for these variations:
+- ;extension=php_gd2.dll (older XAMPP versions)
+- ;extension=gd2
+
+Change any of these to:
+- extension=gd
+
+After making changes, ALWAYS restart Apache!
+
+======================================

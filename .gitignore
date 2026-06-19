@@ -1,0 +1,44 @@
+# Dependencies
+/vendor/
+composer.lock
+
+# Configuration
+config/firebase-service-account.json
+
+# Uploads
+assets/uploads/students/*
+assets/uploads/logos/*
+!assets/uploads/students/.gitkeep
+!assets/uploads/logos/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+tmp/
+temp/
+cache/
+.runtime/
+.tmp_character_preview.html
+
+# Backup files
+*.sql.backup
+*.sql.gz
+backup/

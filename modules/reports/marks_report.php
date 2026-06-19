@@ -1,0 +1,1 @@
+<?php header("Location: ../marks/index.php"); exit(); ?>

@@ -1,0 +1,31 @@
+# School Management System - Apache Configuration
+# Prevent directory browsing
+Options -Indexes
+
+# Enable URL Rewriting
+RewriteEngine On
+
+# Prevent direct access to sensitive files
+<FilesMatch "\.(sql|env|ini|log)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Block access to config files
+<Files "config.php">
+    Order allow,deny
+    Deny from all
+</Files>
+
+# Custom error pages
+ErrorDocument 404 /account3/404.php
+ErrorDocument 403 /account3/403.php
+
+# Set default timezone
+php_value date.timezone "Asia/Kolkata"
+
+# File upload limits
+php_value upload_max_filesize 10M
+php_value post_max_size 10M
+php_value max_execution_time 300
+php_value max_input_time 300

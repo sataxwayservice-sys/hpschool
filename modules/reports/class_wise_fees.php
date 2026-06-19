@@ -1,0 +1,1 @@
+<?php header("Location: fee_collection.php"); exit(); ?>
