@@ -7,6 +7,23 @@
 // Database credentials
 // Auto-detect environment or use environment variables
 if (!defined('DB_HOST')) {
+    $currentHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $isLocalHost = $currentHost === '' || $currentHost === 'localhost' || $currentHost === '127.0.0.1' || str_starts_with($currentHost, 'localhost:') || str_starts_with($currentHost, '127.0.0.1:');
+    $liveDatabaseConfigFile = __DIR__ . '/database.live.php';
+
+    if (!$isLocalHost && is_file($liveDatabaseConfigFile)) {
+        $liveDatabaseConfig = include $liveDatabaseConfigFile;
+
+        if (is_array($liveDatabaseConfig)) {
+            define('DB_HOST', $liveDatabaseConfig['host'] ?? 'localhost');
+            define('DB_USER', $liveDatabaseConfig['user'] ?? 'root');
+            define('DB_PASS', $liveDatabaseConfig['pass'] ?? '');
+            define('DB_NAME', $liveDatabaseConfig['name'] ?? 'school_fees_system');
+            define('DB_CHARSET', $liveDatabaseConfig['charset'] ?? 'utf8mb4');
+        }
+    }
+
+    if (!defined('DB_HOST')) {
     // Check if we're on InfinityFree or production
     if (strpos($_SERVER['HTTP_HOST'] ?? '', 'infinityfree') !== false ||
         strpos($_SERVER['DOCUMENT_ROOT'] ?? '', 'infinityfree') !== false ||
@@ -25,6 +42,7 @@ if (!defined('DB_HOST')) {
         define('DB_NAME', 'school_fees_system');
     }
     define('DB_CHARSET', 'utf8mb4');
+    }
 }
 
 /**
