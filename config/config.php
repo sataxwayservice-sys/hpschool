@@ -39,6 +39,54 @@ if (!defined('COMPANY_LOGO')) {
 }
 
 if (!function_exists('resolveAppUrl')) {
+    function resolveAppBasePath() {
+        $serverPath = '';
+        if (!empty($_SERVER['REQUEST_URI'])) {
+            $serverPath = parse_url((string)$_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '';
+        } elseif (!empty($_SERVER['SCRIPT_NAME'])) {
+            $serverPath = (string)$_SERVER['SCRIPT_NAME'];
+        } elseif (!empty($_SERVER['PHP_SELF'])) {
+            $serverPath = (string)$_SERVER['PHP_SELF'];
+        }
+
+        $serverPath = str_replace('\\', '/', $serverPath);
+
+        $markers = [
+            '/modules/',
+            '/assets/',
+            '/ajax/',
+            '/api/',
+            '/config/',
+            '/database/',
+            '/includes/',
+            '/cron/',
+            '/migrations/',
+            '/vendor/',
+        ];
+
+        foreach ($markers as $marker) {
+            $markerPos = strpos($serverPath, $marker);
+            if ($markerPos !== false) {
+                return rtrim(substr($serverPath, 0, $markerPos), '/');
+            }
+        }
+
+        if ($serverPath !== '' && preg_match('/\.php$/i', $serverPath)) {
+            $basePath = rtrim(str_replace('\\', '/', dirname($serverPath)), '/');
+            if ($basePath === '/' || $basePath === '.' ) {
+                return '';
+            }
+            return $basePath;
+        }
+
+        $basePath = rtrim($serverPath, '/');
+        if ($basePath === '/' || $basePath === '.') {
+            return '';
+        }
+
+        return $basePath;
+    }
+
     function resolveAppUrl() {
         $fallback = 'http://localhost:8080/account3';
         $envUrl = getenv('APP_URL');
@@ -60,7 +108,8 @@ if (!function_exists('resolveAppUrl')) {
         }
 
         $host = $_SERVER['HTTP_HOST'];
-        return $scheme . '://' . $host . '/account3';
+        $basePath = resolveAppBasePath();
+        return $scheme . '://' . $host . ($basePath !== '' ? $basePath : '');
     }
 }
 
