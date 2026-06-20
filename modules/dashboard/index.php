@@ -112,45 +112,6 @@ if ($currentSchoolId > 0) {
 
 $adminPortalTiles = [];
 if (($currentUser['role'] ?? '') === 'admin') {
-    if (function_exists('hasRolePermissionForSchool') && hasRolePermissionForSchool('school_settings', 'view', $currentSchoolId, 'admin')) {
-        $adminPortalTiles[] = [
-            'title' => 'School Settings',
-            'description' => 'Update school profile, logo, contacts, and identity.',
-            'icon' => 'bi-building-gear',
-            'variant' => 'primary',
-            'href' => APP_URL . '/modules/settings/school.php',
-        ];
-    }
-
-    if (function_exists('hasRolePermissionForSchool') && hasRolePermissionForSchool('academic_years', 'view', $currentSchoolId, 'admin')) {
-        $adminPortalTiles[] = [
-            'title' => 'Academic Years',
-            'description' => 'Manage the active academic year and session flow.',
-            'icon' => 'bi-calendar-range',
-            'variant' => 'warning',
-            'href' => APP_URL . '/modules/settings/academic_years.php',
-        ];
-    }
-
-    if (function_exists('hasRolePermissionForSchool') && hasRolePermissionForSchool('session_rollover', 'view', $currentSchoolId, 'admin')) {
-        $adminPortalTiles[] = [
-            'title' => 'Session Rollover',
-            'description' => 'Move the school into the next academic session.',
-            'icon' => 'bi-arrow-repeat',
-            'variant' => 'dark',
-            'href' => APP_URL . '/modules/settings/session_rollover.php',
-        ];
-    }
-
-    if (function_exists('hasRolePermissionForSchool') && hasRolePermissionForSchool('student_portal', 'view', $currentSchoolId, 'admin')) {
-        $adminPortalTiles[] = [
-            'title' => 'Student Portal',
-            'description' => 'Control student login, approvals, and visible tools.',
-            'icon' => 'bi-mortarboard',
-            'variant' => 'info',
-            'href' => APP_URL . '/modules/settings/student_portal.php',
-        ];
-    }
 }
 
 $superAdminControlGroups = [
@@ -158,13 +119,6 @@ $superAdminControlGroups = [
         'title' => 'System Setup',
         'description' => 'Core school branding, security, and structure tools.',
         'items' => [
-            [
-                'title' => 'School Settings',
-                'description' => 'Update school profile, logo, contacts, and identity.',
-                'icon' => 'bi-building-gear',
-                'variant' => 'primary',
-                'href' => APP_URL . '/modules/settings/school.php'
-            ],
             [
                 'title' => 'User Management',
                 'description' => 'Create and manage staff, admin, and system users.',
@@ -185,20 +139,6 @@ $superAdminControlGroups = [
                 'icon' => 'bi-person-gear',
                 'variant' => 'info',
                 'href' => APP_URL . '/modules/settings/school_role_control.php'
-            ],
-            [
-                'title' => 'Academic Years',
-                'description' => 'Manage the current academic year and session flow.',
-                'icon' => 'bi-calendar-range',
-                'variant' => 'info',
-                'href' => APP_URL . '/modules/settings/academic_years.php'
-            ],
-            [
-                'title' => 'Session Rollover',
-                'description' => 'Carry forward classes, students, and records safely.',
-                'icon' => 'bi-arrow-repeat',
-                'variant' => 'dark',
-                'href' => APP_URL . '/modules/settings/session_rollover.php'
             ],
             [
                 'title' => 'Recycle Bin',
@@ -226,13 +166,6 @@ $superAdminControlGroups = [
                 'icon' => 'bi-grid-3x3-gap',
                 'variant' => 'success',
                 'href' => APP_URL . '/modules/settings/sections.php'
-            ],
-            [
-                'title' => 'Student Portal',
-                'description' => 'Control student login, approvals, and visible tools.',
-                'icon' => 'bi-mortarboard',
-                'variant' => 'info',
-                'href' => APP_URL . '/modules/settings/student_portal.php'
             ],
             [
                 'title' => 'Student Applications',
@@ -525,13 +458,7 @@ include '../../includes/header.php';
 <div class="row mt-4" id="admin-portal-control-panel">
     <div class="col-12">
         <div class="card dashboard-card">
-            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <div>
-                    <h5 class="mb-0">
-                        <i class="bi bi-sliders"></i> Admin Portal
-                    </h5>
-                    <small class="text-white-50">Quick access to the school tools available for your school.</small>
-                </div>
+            <div class="card-header bg-dark text-white d-flex justify-content-end align-items-center">
                 <span class="badge bg-light text-dark">Admin only</span>
             </div>
             <div class="card-body">
@@ -540,14 +467,6 @@ include '../../includes/header.php';
                 </div>
 
                 <div class="control-panel-group">
-                    <div class="control-panel-group-title">
-                        <h6>
-                            <i class="bi bi-folder2-open"></i>
-                            School Tools
-                        </h6>
-                        <small>Core setup and student portal entry points for this school.</small>
-                    </div>
-
                     <div class="control-panel-grid">
                         <?php foreach ($adminPortalTiles as $tile): ?>
                         <a href="<?php echo htmlspecialchars($tile['href']); ?>" class="control-panel-tile variant-<?php echo htmlspecialchars($tile['variant']); ?> text-decoration-none">

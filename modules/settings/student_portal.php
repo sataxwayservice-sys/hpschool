@@ -746,11 +746,6 @@ include '../../includes/header.php';
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
-                            <?php if (empty($announcementRecords)): ?>
-                                <tr>
-                                    <td colspan="7" class="text-center text-muted">No announcements created yet.</td>
-                                </tr>
-                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
@@ -848,11 +843,6 @@ include '../../includes/header.php';
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
-                            <?php if (empty($applications)): ?>
-                                <tr>
-                                    <td colspan="9" class="text-center text-muted">No student applications found yet.</td>
-                                </tr>
-                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
@@ -966,6 +956,9 @@ $('#studentApplicationsTable').DataTable({
     order: [[0, 'desc']],
     pageLength: 25,
     lengthMenu: [[10, 25, 50, 100], [10, 25, 50, 100]],
+    language: {
+        emptyTable: 'No student applications found yet.'
+    },
     dom: 'Bfrtip',
     buttons: [
         {
@@ -1008,6 +1001,9 @@ $('#announcementTable').DataTable({
     order: [[0, 'desc']],
     pageLength: 10,
     lengthMenu: [[10, 25, 50], [10, 25, 50]],
+    language: {
+        emptyTable: 'No announcements created yet.'
+    },
     dom: 'Bfrtip',
     buttons: [
         {
