@@ -90,3 +90,45 @@ Security & Supabase reminder
 - If you plan to use Supabase (Postgres), the app currently uses MySQL-specific code (`mysqli`) and MySQL-flavored SQL. Migrating requires converting the schema and code to Postgres-compatible SQL and a `PDO` or `pg_connect`-based database layer.
 
 Files added in this step: `config/database.live.php.example`, `render.yaml`, `fly.toml`.
+
+Supabase quick import
+
+1. Get your **Postgres connection string** from the Supabase dashboard (Settings → Database → Connection string). It looks like:
+
+```
+postgres://<db_user>:<db_pass>@<db_host>:5432/<db_name>
+```
+
+2. On your machine, import the converted SQL (example uses the large schema file):
+
+```bash
+# using psql
+psql "postgres://<db_user>:<db_pass>@<db_host>:5432/<db_name>" -f database/postgres/school_management.pgsql.sql
+```
+
+3. Alternatively use Supabase SQL editor (Dashboard → SQL) and paste smaller scripts there.
+
+4. Set environment variables for your app (server only):
+
+- `DB_DRIVER=pgsql`
+- `DB_HOST=<db_host>`
+- `DB_PORT=5432`
+- `DB_NAME=<db_name>`
+- `DB_USER=<db_user>`
+- `DB_PASS=<db_pass>`
+- `SUPABASE_URL` = your Supabase project URL
+- `SUPABASE_ANON_KEY` = anon/public key (used on client)
+- `SUPABASE_SERVICE_ROLE_KEY` = service_role key (server-only; keep secret)
+
+Security note:
+
+- Never commit `SUPABASE_SERVICE_ROLE_KEY` or DB credentials into git. Use your hosting provider's secret environment variables.
+- The `SUPABASE_SERVICE_ROLE_KEY` grants elevated privileges — only use it in server-side code.
+
+If you want, I can attempt the following automatically:
+
+- Convert CURDATE/DATE_ADD/ON DUPLICATE statements to Postgres equivalents across the converted files.
+- Rewrite INSERT ... ON DUPLICATE KEY UPDATE to `INSERT ... ON CONFLICT ... DO UPDATE` where unique constraints exist.
+- Mark lines requiring manual review.
+
+If you'd like me to proceed with automatic conversion of those remaining items, say "convert inserts" and I'll run it and place outputs in `database/postgres/converted/`.
