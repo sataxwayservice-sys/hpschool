@@ -1,0 +1,10 @@
+<?php
+// Example production database config file
+// Copy this to config/database.live.php and fill in real credentials.
+return [
+    'host' => 'your-production-db-host',
+    'user' => 'your-db-username',
+    'pass' => 'your-db-password',
+    'name' => 'your-database-name',
+    'charset' => 'utf8mb4',
+];

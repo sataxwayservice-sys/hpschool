@@ -197,15 +197,29 @@ ini_set('display_errors', 1);
             ];
             if (!$phpOk) $issues++;
 
-            // Check 2: MySQLi Extension
-            $mysqliLoaded = extension_loaded('mysqli');
-            $checks[] = [
-                'status' => $mysqliLoaded ? 'success' : 'error',
-                'icon' => $mysqliLoaded ? '✓' : '✗',
-                'title' => 'MySQLi Extension',
-                'message' => $mysqliLoaded ? 'MySQLi extension is loaded and ready' : 'MySQLi extension is NOT loaded - install it in XAMPP'
-            ];
-            if (!$mysqliLoaded) $issues++;
+            // Check 2: Database driver support
+            require_once __DIR__ . '/config/config.php';
+            $driver = defined('DB_DRIVER') ? DB_DRIVER : (getenv('DB_DRIVER') ?: 'mysql');
+
+            if ($driver === 'mysql') {
+                $ok = extension_loaded('mysqli');
+                $checks[] = [
+                    'status' => $ok ? 'success' : 'error',
+                    'icon' => $ok ? '✓' : '✗',
+                    'title' => 'MySQLi Extension',
+                    'message' => $ok ? 'MySQLi extension is loaded and ready' : 'MySQLi extension is NOT loaded - install it in your PHP runtime'
+                ];
+                if (!$ok) $issues++;
+            } else {
+                $ok = extension_loaded('pdo') && extension_loaded('pdo_pgsql');
+                $checks[] = [
+                    'status' => $ok ? 'success' : 'error',
+                    'icon' => $ok ? '✓' : '✗',
+                    'title' => 'PDO / pgsql',
+                    'message' => $ok ? 'PDO and pdo_pgsql are available' : 'PDO or pdo_pgsql not available - enable them for Postgres/Supabase'
+                ];
+                if (!$ok) $issues++;
+            }
 
             // Check 3: Config Files
             $configExists = file_exists(__DIR__ . '/config/config.php');
@@ -223,25 +237,48 @@ ini_set('display_errors', 1);
             if ($bothExist) {
                 try {
                     require_once __DIR__ . '/config/config.php';
+                    $conn = getDbConnection();
+                    $driver = DB_DRIVER;
 
-                    // Try to connect without dying
-                    mysqli_report(MYSQLI_REPORT_OFF);
-                    $testConn = @new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+                    if ($driver === 'mysql') {
+                        // mysqli
+                        mysqli_report(MYSQLI_REPORT_OFF);
+                        if ($conn->connect_error ?? false) {
+                            $checks[] = [
+                                'status' => 'error',
+                                'icon' => '✗',
+                                'title' => 'Database Connection',
+                                'message' => 'Cannot connect to database.'
+                            ];
+                            $issues++;
+                        } else {
+                            $result = $conn->query("SHOW TABLES");
+                            $tableCount = $result ? $result->num_rows : 0;
 
-                    if ($testConn->connect_error) {
-                        $checks[] = [
-                            'status' => 'error',
-                            'icon' => '✗',
-                            'title' => 'Database Connection',
-                            'message' => 'Cannot connect to database<br>' .
-                                        'Error: ' . $testConn->connect_error . '<br>' .
-                                        'Using: Host=<code>' . DB_HOST . '</code>, User=<code>' . DB_USER . '</code>, DB=<code>' . DB_NAME . '</code>'
-                        ];
-                        $issues++;
+                            if ($tableCount > 0) {
+                                $checks[] = [
+                                    'status' => 'success',
+                                    'icon' => '✓',
+                                    'title' => 'Database Connection',
+                                    'message' => "Connected successfully! Found $tableCount tables in database <code>" . DB_NAME . "</code>"
+                                ];
+                            } else {
+                                $checks[] = [
+                                    'status' => 'warning',
+                                    'icon' => '⚠',
+                                    'title' => 'Database Connection',
+                                    'message' => 'Connected but no tables found. You need to import database.sql'
+                                ];
+                                $issues++;
+                            }
+                            $conn->close();
+                        }
                     } else {
-                        // Check tables
-                        $result = $testConn->query("SHOW TABLES");
-                        $tableCount = $result ? $result->num_rows : 0;
+                        // Postgres via PDO
+                        $stmt = $conn->prepare("SELECT tablename FROM pg_tables WHERE schemaname = 'public'");
+                        $stmt->execute();
+                        $rows = $stmt->fetchAll(PDO::FETCH_NUM);
+                        $tableCount = is_array($rows) ? count($rows) : 0;
 
                         if ($tableCount > 0) {
                             $checks[] = [
@@ -255,12 +292,12 @@ ini_set('display_errors', 1);
                                 'status' => 'warning',
                                 'icon' => '⚠',
                                 'title' => 'Database Connection',
-                                'message' => 'Connected but no tables found. You need to import database.sql'
+                                'message' => 'Connected but no tables found. You need to import Postgres schema'
                             ];
                             $issues++;
                         }
-                        $testConn->close();
                     }
+
                 } catch (Exception $e) {
                     $checks[] = [
                         'status' => 'error',

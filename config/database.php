@@ -51,58 +51,56 @@ if (!defined('DB_HOST')) {
 }
 
 /**
+ * Database driver support
+ * Supports: mysql (mysqli) and pgsql (PDO)
+ */
+if (!defined('DB_DRIVER')) {
+    $envDriver = getenv('DB_DRIVER');
+    define('DB_DRIVER', $envDriver ?: 'mysql');
+}
+
+/**
  * Get Database Connection
- * @return mysqli|false
+ * Returns mysqli or PDO depending on DB_DRIVER
+ * @return mysqli|PDO|false
  */
 function getDbConnection() {
     static $conn = null;
     $currentHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? '')));
     $isLocalHost = $currentHost === '' || $currentHost === 'localhost' || $currentHost === '127.0.0.1' || str_starts_with($currentHost, 'localhost:') || str_starts_with($currentHost, '127.0.0.1:');
 
-    if ($conn === null) {
-        try {
-            // Create connection
+    if ($conn !== null) {
+        return $conn;
+    }
+
+    try {
+        if (DB_DRIVER === 'pgsql') {
+            // Use PDO for Postgres (e.g., Supabase)
+            $port = getenv('DB_PORT') ?: 5432;
+            $dsn = sprintf('pgsql:host=%s;port=%s;dbname=%s', DB_HOST, $port, DB_NAME);
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ];
+
+            $conn = new PDO($dsn, DB_USER, DB_PASS, $options);
+        } else {
+            // Default to mysqli for MySQL
             $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 
-            // Check connection
             if ($conn->connect_error) {
-                error_log("Database Connection Failed: " . $conn->connect_error);
-
-                // Show helpful error message
-                if (!$isLocalHost) {
-                    // Production error - hide details
-                    die("Database connection failed. Please check your database credentials in config/database.php");
-                } else {
-                    // Development error - show details
-                    die("Database connection failed: " . $conn->connect_error . "<br>Check your database credentials in config/database.php");
-                }
+                throw new Exception($conn->connect_error, $conn->connect_errno);
             }
 
-            // Set charset
             $conn->set_charset(DB_CHARSET);
-
-            // IMPORTANT: Ensure autocommit is enabled by default
             $conn->autocommit(TRUE);
-
-        } catch (Exception $e) {
-            error_log("Database Error: " . $e->getMessage());
-
-            // Show helpful error message based on environment
-            if ($isLocalHost) {
-                // Development - show detailed error
-                die("<h3>Database Error</h3>" .
-                    "<p><strong>Error:</strong> " . $e->getMessage() . "</p>" .
-                    "<p><strong>Solutions:</strong></p>" .
-                    "<ul>" .
-                    "<li>Make sure XAMPP MySQL is running</li>" .
-                    "<li>Check if database '" . DB_NAME . "' exists in phpMyAdmin</li>" .
-                    "<li>Verify credentials in config/database.php</li>" .
-                    "<li>Run <a href='diagnose_database.php'>diagnose_database.php</a> for detailed diagnostics</li>" .
-                    "</ul>");
-            } else {
-                // Production - hide details
-                die("Database error occurred. Please check your database credentials in config/database.php");
-            }
+        }
+    } catch (Exception $e) {
+        error_log("Database Connection Failed: " . $e->getMessage());
+        if ($isLocalHost) {
+            die("Database connection failed: " . $e->getMessage() . "<br>Check your database credentials in config/database.php");
+        } else {
+            die("Database connection failed. Please check your database credentials in config/database.php");
         }
     }
 
@@ -131,38 +129,65 @@ function executeQuery($query, $types = '', $params = []) {
     $conn = getDbConnection();
 
     try {
-        $stmt = $conn->prepare($query);
+        if (DB_DRIVER === 'pgsql') {
+            $stmt = $conn->prepare($query);
+            if (!$stmt) {
+                error_log("Query Prepare Failed: " . implode(' ', $conn->errorInfo()));
+                return false;
+            }
 
-        if (!$stmt) {
-            error_log("Query Prepare Failed: " . $conn->error);
-            return false;
-        }
+            // Bind all parameters as strings by default
+            foreach ($params as $i => $value) {
+                $stmt->bindValue($i + 1, $value);
+            }
 
-        // Bind parameters if provided
-        if (!empty($types) && !empty($params)) {
-            $stmt->bind_param($types, ...$params);
-        }
+            $stmt->execute();
 
-        // Execute statement
-        $result = $stmt->execute();
+            $insertId = null;
+            $affectedRows = $stmt->rowCount();
 
-        if (!$result) {
-            error_log("Query Execute Failed: " . $stmt->error);
+            // Attempt to fetch last insert id if available
+            try {
+                $lastId = $conn->lastInsertId();
+                if ($lastId !== false) {
+                    $insertId = $lastId;
+                }
+            } catch (Exception $e) {
+                // ignore
+            }
+
+            return ['insert_id' => $insertId, 'affected_rows' => $affectedRows, 'statement' => $stmt];
+        } else {
+            $stmt = $conn->prepare($query);
+
+            if (!$stmt) {
+                error_log("Query Prepare Failed: " . $conn->error);
+                return false;
+            }
+
+            if (!empty($types) && !empty($params)) {
+                $stmt->bind_param($types, ...$params);
+            }
+
+            $result = $stmt->execute();
+
+            if (!$result) {
+                error_log("Query Execute Failed: " . $stmt->error);
+                $stmt->close();
+                return false;
+            }
+
+            if ($stmt->affected_rows >= 0 || $stmt->insert_id > 0) {
+                $insertId = $stmt->insert_id;
+                $affectedRows = $stmt->affected_rows;
+                $stmt->close();
+                return ['insert_id' => $insertId, 'affected_rows' => $affectedRows];
+            }
+
+            $result = $stmt->get_result();
             $stmt->close();
-            return false;
+            return $result;
         }
-
-        // Return result
-        if ($stmt->affected_rows >= 0 || $stmt->insert_id > 0) {
-            $insertId = $stmt->insert_id;
-            $affectedRows = $stmt->affected_rows;
-            $stmt->close();
-            return ['insert_id' => $insertId, 'affected_rows' => $affectedRows];
-        }
-
-        $result = $stmt->get_result();
-        $stmt->close();
-        return $result;
 
     } catch (Exception $e) {
         error_log("Database Query Error: " . $e->getMessage());
@@ -179,10 +204,17 @@ function executeQuery($query, $types = '', $params = []) {
  * @return array|null
  */
 function fetchOne($query, $types = '', $params = []) {
-    $result = executeQuery($query, $types, $params);
+    $res = executeQuery($query, $types, $params);
 
-    if ($result && $result instanceof mysqli_result) {
-        return $result->fetch_assoc();
+    if (DB_DRIVER === 'pgsql') {
+        if ($res && isset($res['statement']) && $res['statement'] instanceof PDOStatement) {
+            return $res['statement']->fetch(PDO::FETCH_ASSOC);
+        }
+        return null;
+    }
+
+    if ($res && $res instanceof mysqli_result) {
+        return $res->fetch_assoc();
     }
 
     return null;
@@ -197,11 +229,18 @@ function fetchOne($query, $types = '', $params = []) {
  * @return array
  */
 function fetchAll($query, $types = '', $params = []) {
-    $result = executeQuery($query, $types, $params);
+    $res = executeQuery($query, $types, $params);
     $data = [];
 
-    if ($result && $result instanceof mysqli_result) {
-        while ($row = $result->fetch_assoc()) {
+    if (DB_DRIVER === 'pgsql') {
+        if ($res && isset($res['statement']) && $res['statement'] instanceof PDOStatement) {
+            return $res['statement']->fetchAll(PDO::FETCH_ASSOC);
+        }
+        return $data;
+    }
+
+    if ($res && $res instanceof mysqli_result) {
+        while ($row = $res->fetch_assoc()) {
             $data[] = $row;
         }
     }
@@ -217,6 +256,11 @@ function fetchAll($query, $types = '', $params = []) {
  */
 function escapeString($string) {
     $conn = getDbConnection();
+    if (DB_DRIVER === 'pgsql') {
+        // PDO::quote adds surrounding quotes
+        $quoted = $conn->quote($string);
+        return substr($quoted, 1, -1);
+    }
     return $conn->real_escape_string($string);
 }
 
@@ -225,7 +269,11 @@ function escapeString($string) {
  */
 function beginTransaction() {
     $conn = getDbConnection();
-    $conn->begin_transaction();
+    if (DB_DRIVER === 'pgsql') {
+        $conn->beginTransaction();
+    } else {
+        $conn->begin_transaction();
+    }
 }
 
 /**
@@ -233,12 +281,13 @@ function beginTransaction() {
  */
 function commitTransaction() {
     $conn = getDbConnection();
-    $conn->commit();
-
-    // CRITICAL: Re-enable autocommit after transaction completes
-    // Without this, the connection stays in transaction mode and
-    // any subsequent queries will be rolled back when connection closes
-    $conn->autocommit(TRUE);
+    if (DB_DRIVER === 'pgsql') {
+        $conn->commit();
+    } else {
+        $conn->commit();
+        // Re-enable autocommit after transaction completes
+        $conn->autocommit(TRUE);
+    }
 }
 
 /**
@@ -246,10 +295,12 @@ function commitTransaction() {
  */
 function rollbackTransaction() {
     $conn = getDbConnection();
-    $conn->rollback();
-
-    // Re-enable autocommit after rollback
-    $conn->autocommit(TRUE);
+    if (DB_DRIVER === 'pgsql') {
+        $conn->rollBack();
+    } else {
+        $conn->rollback();
+        $conn->autocommit(TRUE);
+    }
 }
 
 // Initialize connection on load

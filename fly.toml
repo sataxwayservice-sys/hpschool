@@ -1,0 +1,13 @@
+app = "hpschool"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DB_CHARSET = "utf8mb4"
+
+[deploy]
+  release_command = ""
+
+[experimental]
+  allowed_public_ports = []

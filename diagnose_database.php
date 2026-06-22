@@ -13,7 +13,13 @@ echo "<hr>";
 // Step 1: Check PHP Version
 echo "<h2>1. PHP Environment</h2>";
 echo "PHP Version: <strong>" . phpversion() . "</strong><br>";
-echo "MySQLi Extension: <strong>" . (extension_loaded('mysqli') ? '✅ Loaded' : '❌ Not Loaded') . "</strong><br>";
+$driver = getenv('DB_DRIVER') ?: 'mysql';
+if ($driver === 'mysql') {
+    echo "MySQLi Extension: <strong>" . (extension_loaded('mysqli') ? '✅ Loaded' : '❌ Not Loaded') . "</strong><br>";
+} else {
+    echo "PDO Extension: <strong>" . (extension_loaded('pdo') ? '✅ Loaded' : '❌ Not Loaded') . "</strong><br>";
+    echo "PDO_PGSQL: <strong>" . (extension_loaded('pdo_pgsql') ? '✅ Loaded' : '❌ Not Loaded') . "</strong><br>";
+}
 echo "<br>";
 
 // Step 2: Check Config Files
@@ -84,80 +90,72 @@ echo "- User: <strong>" . DB_USER . "</strong><br>";
 echo "- Database: <strong>" . DB_NAME . "</strong><br>";
 echo "<br>";
 
-// Disable mysqli error reporting temporarily to catch errors manually
-mysqli_report(MYSQLI_REPORT_OFF);
+require_once __DIR__ . '/config/config.php';
 
-$conn = @new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
-
-if ($conn->connect_error) {
-    echo "❌ <span style='color: red;'><strong>Connection Failed!</strong></span><br>";
-    echo "Error Code: <strong>" . $conn->connect_errno . "</strong><br>";
-    echo "Error Message: <strong>" . $conn->connect_error . "</strong><br>";
-    echo "<br>";
-
-    // Common error codes and solutions
-    echo "<h3>💡 Troubleshooting:</h3>";
-
-    switch ($conn->connect_errno) {
-        case 1045: // Access denied
-            echo "<strong>Error 1045: Access denied for user</strong><br>";
-            echo "Solutions:<br>";
-            echo "1. Check username and password in config/database.php<br>";
-            echo "2. Make sure the database user exists in phpMyAdmin<br>";
-            echo "3. Verify the user has proper privileges<br>";
-            break;
-
-        case 2002: // Can't connect to server
-            echo "<strong>Error 2002: Can't connect to MySQL server</strong><br>";
-            echo "Solutions:<br>";
-            echo "1. Make sure XAMPP/MySQL is running<br>";
-            echo "2. Open XAMPP Control Panel and start MySQL<br>";
-            echo "3. Check if MySQL service is running<br>";
-            break;
-
-        case 1049: // Unknown database
-            echo "<strong>Error 1049: Unknown database</strong><br>";
-            echo "Solutions:<br>";
-            echo "1. Database '" . DB_NAME . "' doesn't exist<br>";
-            echo "2. Create it in phpMyAdmin<br>";
-            echo "3. Or import the database.sql file<br>";
-            break;
-
-        default:
-            echo "Check MySQL error documentation for error code " . $conn->connect_errno . "<br>";
-    }
-} else {
+try {
+    $conn = getDbConnection();
     echo "✅ <span style='color: green;'><strong>Connection Successful!</strong></span><br>";
     echo "<br>";
 
-    // Test charset
-    $charset = $conn->character_set_name();
-    echo "Character Set: <strong>$charset</strong><br>";
-    echo "<br>";
+    if (DB_DRIVER === 'mysql') {
+        // Test charset
+        $charset = $conn->character_set_name();
+        echo "Character Set: <strong>$charset</strong><br>";
+        echo "<br>";
 
-    // Check if tables exist
-    echo "<h3>7. Database Tables</h3>";
-    $result = $conn->query("SHOW TABLES");
+        echo "<h3>7. Database Tables</h3>";
+        $result = $conn->query("SHOW TABLES");
 
-    if ($result) {
-        $tableCount = $result->num_rows;
-        echo "Tables found: <strong>$tableCount</strong><br><br>";
+        if ($result) {
+            $tableCount = $result->num_rows;
+            echo "Tables found: <strong>$tableCount</strong><br><br>";
+
+            if ($tableCount > 0) {
+                echo "<table border='1' cellpadding='5' style='border-collapse: collapse;'>";
+                echo "<tr><th>#</th><th>Table Name</th></tr>";
+                $i = 1;
+                while ($row = $result->fetch_array()) {
+                    echo "<tr><td>$i</td><td>" . $row[0] . "</td></tr>";
+                    $i++;
+                }
+                echo "</table>";
+            } else {
+                echo "⚠️ <span style='color: orange;'>No tables found. You need to import database.sql</span><br>";
+            }
+        }
+
+        $conn->close();
+    } else {
+        // Postgres
+        echo "Character Set: <strong>UTF-8 (Postgres)</strong><br><br>";
+
+        echo "<h3>7. Database Tables</h3>";
+        $stmt = $conn->prepare("SELECT tablename FROM pg_tables WHERE schemaname = 'public'");
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_NUM);
+        $tableCount = is_array($rows) ? count($rows) : 0;
 
         if ($tableCount > 0) {
+            echo "Tables found: <strong>$tableCount</strong><br><br>";
             echo "<table border='1' cellpadding='5' style='border-collapse: collapse;'>";
             echo "<tr><th>#</th><th>Table Name</th></tr>";
             $i = 1;
-            while ($row = $result->fetch_array()) {
-                echo "<tr><td>$i</td><td>" . $row[0] . "</td></tr>";
+            foreach ($rows as $row) {
+                echo "<tr><td>$i</td><td>" . htmlspecialchars($row[0]) . "</td></tr>";
                 $i++;
             }
             echo "</table>";
         } else {
-            echo "⚠️ <span style='color: orange;'>No tables found. You need to import database.sql</span><br>";
+            echo "⚠️ <span style='color: orange;'>No tables found. You need to import Postgres schema</span><br>";
         }
     }
 
-    $conn->close();
+} catch (Exception $e) {
+    echo "❌ <span style='color: red;'><strong>Connection Failed!</strong></span><br>";
+    echo "Error Message: <strong>" . $e->getMessage() . "</strong><br>";
+    echo "<br>";
+    echo "<h3>💡 Troubleshooting:</h3>";
+    echo "Check your database credentials and driver configuration in config/database.php or environment variables.<br>";
 }
 
 echo "<br><hr>";

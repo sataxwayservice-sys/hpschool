@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: hpschool-web
+    env: docker
+    branch: main
+    autoDeploy: true
+    buildCommand: docker build -t hpschool:latest .
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: DB_HOST
+        value: "<your-db-host>"
+      - key: DB_USER
+        value: "<your-db-user>"
+      - key: DB_PASS
+        value: "<your-db-pass>"
+      - key: DB_NAME
+        value: "<your-db-name>"
+      - key: DB_CHARSET
+        value: "utf8mb4"
+    plan: free
