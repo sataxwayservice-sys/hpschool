@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HP School - Hosted on GitHub Pages</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#f7fafc; color:#1a202c; margin:0; }
+    .wrap{max-width:880px;margin:6vh auto;padding:32px;background:#fff;border-radius:12px;box-shadow:0 6px 24px rgba(2,6,23,0.08)}
+    h1{margin:0 0 8px;font-size:28px}
+    p{margin:8px 0 16px;line-height:1.5}
+    a.btn{display:inline-block;padding:10px 14px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none;margin-right:8px}
+    .muted{color:#4a5568}
+    pre{background:#0f172a;color:#fff;padding:12px;border-radius:8px;overflow:auto}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>HP School</h1>
+    <p class="muted">This repository is a PHP application and requires a PHP runtime. GitHub Pages serves static sites only, so the full app cannot run here.</p>
+
+    <p>What this page provides:</p>
+    <ul>
+      <li>A static landing page so your GitHub Pages URL loads successfully.</li>
+      <li>Links and instructions to deploy the full PHP app using Docker-friendly hosts (Render/Fly) or Supabase for Postgres.</li>
+    </ul>
+
+    <p>
+      <a class="btn" href="https://github.com/sataxwayservice-sys/hpschool">View Repository</a>
+      <a class="btn" href="/DEPLOYMENT.md">Deployment Guide</a>
+    </p>
+
+    <h3>Make the app live</h3>
+    <p class="muted">Recommended: deploy the full app with Docker to Render or Fly. I can help deploy there and connect your database.</p>
+
+    <h3>If you want a quick static snapshot</h3>
+    <p class="muted">I can export a static version of the public pages (HTML) and publish them to GitHub Pages. Reply "export static" to proceed.</p>
+
+    <h3>Supabase / API keys</h3>
+    <p class="muted">If you've configured Supabase, keep service_role keys secret and set them in your host environment — do not commit them.</p>
+
+    <hr>
+    <p class="muted">After this commit, enable Pages in the repository settings → Pages → Source: <strong>Main branch /docs folder</strong>. Your page will be available at <code>https://sataxwayservice-sys.github.io/hpschool/</code>.</p>
+  </div>
+</body>
+</html>
