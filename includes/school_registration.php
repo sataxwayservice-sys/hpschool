@@ -169,7 +169,25 @@ if (!function_exists('schoolRegistrationGetDefaultSettings')) {
             'teacher_signature' => '',
             'class_teacher_signature' => '',
             'principal_signature' => '',
+            'student_add_limit' => 0,
+            'attendance_scan_mode' => 'daily',
+            'attendance_class_start_time' => '08:00:00',
+            'attendance_period_duration_minutes' => 45,
+            'attendance_auto_alert_enabled' => 1,
+            'attendance_absent_message_template' => 'Dear Parent, {student_details} was marked ABSENT {period_text} on {date} at {school_name}. Please contact the school office if this needs correction.',
             'enabled_roles' => json_encode(['admin', 'accountant', 'clerk', 'teacher', 'parent']),
+            'subscription_plan' => 'free',
+            'subscription_price' => '0.00',
+            'subscription_currency_code' => 'INR',
+            'subscription_billing_cycle' => 'monthly',
+            'subscription_status' => 'active',
+            'ads_enabled' => 1,
+            'subscription_started_at' => null,
+            'subscription_expires_at' => null,
+            'subscription_gateway' => 'manual',
+            'subscription_gateway_reference' => '',
+            'subscription_payment_link' => '',
+            'subscription_notes' => '',
             'transfer_certificate_prefix' => 'TC/',
             'transfer_certificate_last_no' => 0,
         ];
@@ -244,6 +262,12 @@ if (!function_exists('schoolRegistrationMapSchoolToSettings')) {
             'teacher_signature' => '',
             'class_teacher_signature' => '',
             'principal_signature' => '',
+            'student_add_limit' => 0,
+            'attendance_scan_mode' => 'daily',
+            'attendance_class_start_time' => '08:00:00',
+            'attendance_period_duration_minutes' => 45,
+            'attendance_auto_alert_enabled' => 1,
+            'attendance_absent_message_template' => 'Dear Parent, {student_details} was marked ABSENT {period_text} on {date} at {school_name}. Please contact the school office if this needs correction.',
             'enabled_roles' => json_encode(['admin', 'accountant', 'clerk', 'teacher', 'parent']),
             'transfer_certificate_prefix' => 'TC/',
             'transfer_certificate_last_no' => 0,
@@ -278,7 +302,25 @@ if (!function_exists('schoolRegistrationMapSchoolToSettings')) {
             'teacher_signature' => trim((string) ($school['teacher_signature'] ?? $fallback['teacher_signature'])),
             'class_teacher_signature' => trim((string) ($school['class_teacher_signature'] ?? $fallback['class_teacher_signature'])),
             'principal_signature' => trim((string) ($school['principal_signature'] ?? $fallback['principal_signature'])),
+            'student_add_limit' => intval($school['student_add_limit'] ?? $fallback['student_add_limit']),
+            'attendance_scan_mode' => trim((string) ($school['attendance_scan_mode'] ?? $fallback['attendance_scan_mode'])),
+            'attendance_class_start_time' => trim((string) ($school['attendance_class_start_time'] ?? $fallback['attendance_class_start_time'])),
+            'attendance_period_duration_minutes' => intval($school['attendance_period_duration_minutes'] ?? $fallback['attendance_period_duration_minutes']),
+            'attendance_auto_alert_enabled' => intval($school['attendance_auto_alert_enabled'] ?? $fallback['attendance_auto_alert_enabled']),
+            'attendance_absent_message_template' => trim((string) ($school['attendance_absent_message_template'] ?? $fallback['attendance_absent_message_template'])),
             'enabled_roles' => trim((string) ($school['enabled_roles'] ?? $fallback['enabled_roles'])),
+            'subscription_plan' => trim((string) ($school['subscription_plan'] ?? $fallback['subscription_plan'])),
+            'subscription_price' => trim((string) ($school['subscription_price'] ?? $fallback['subscription_price'])),
+            'subscription_currency_code' => trim((string) ($school['subscription_currency_code'] ?? $fallback['subscription_currency_code'])),
+            'subscription_billing_cycle' => trim((string) ($school['subscription_billing_cycle'] ?? $fallback['subscription_billing_cycle'])),
+            'subscription_status' => trim((string) ($school['subscription_status'] ?? $fallback['subscription_status'])),
+            'ads_enabled' => intval($school['ads_enabled'] ?? $fallback['ads_enabled']),
+            'subscription_started_at' => $school['subscription_started_at'] ?? $fallback['subscription_started_at'],
+            'subscription_expires_at' => $school['subscription_expires_at'] ?? $fallback['subscription_expires_at'],
+            'subscription_gateway' => trim((string) ($school['subscription_gateway'] ?? $fallback['subscription_gateway'])),
+            'subscription_gateway_reference' => trim((string) ($school['subscription_gateway_reference'] ?? $fallback['subscription_gateway_reference'])),
+            'subscription_payment_link' => trim((string) ($school['subscription_payment_link'] ?? $fallback['subscription_payment_link'])),
+            'subscription_notes' => trim((string) ($school['subscription_notes'] ?? $fallback['subscription_notes'])),
             'transfer_certificate_prefix' => trim((string) ($school['transfer_certificate_prefix'] ?? $fallback['transfer_certificate_prefix'])),
             'transfer_certificate_last_no' => intval($school['transfer_certificate_last_no'] ?? $fallback['transfer_certificate_last_no']),
         ];
@@ -290,6 +332,16 @@ if (!function_exists('schoolRegistrationSyncApprovedSchoolSettings')) {
         ensureSchoolSettingsSchema();
 
         $settings = schoolRegistrationMapSchoolToSettings($school, schoolRegistrationGetDefaultSettings());
+        $existingSettings = fetchOne(
+            "SELECT setting_id FROM school_settings WHERE school_id = ? ORDER BY updated_at DESC, setting_id DESC LIMIT 1",
+            'i',
+            [intval($settings['school_id'])]
+        );
+
+        if ($existingSettings && intval($existingSettings['setting_id'] ?? 0) > 0) {
+            return true;
+        }
+
         $fields = [
             'school_id', 'school_name', 'school_address', 'school_phone', 'school_email',
             'current_academic_year', 'admission_prefix', 'receipt_prefix',
@@ -300,7 +352,22 @@ if (!function_exists('schoolRegistrationSyncApprovedSchoolSettings')) {
             'theme_danger_color', 'currency_symbol', 'upi_id',
             'payment_recipient_name', 'payment_note',
             'teacher_signature', 'class_teacher_signature', 'principal_signature',
+            'student_add_limit',
+            'attendance_scan_mode', 'attendance_class_start_time', 'attendance_period_duration_minutes',
+            'attendance_auto_alert_enabled', 'attendance_absent_message_template',
             'enabled_roles',
+            'subscription_plan',
+            'subscription_price',
+            'subscription_currency_code',
+            'subscription_billing_cycle',
+            'subscription_status',
+            'ads_enabled',
+            'subscription_started_at',
+            'subscription_expires_at',
+            'subscription_gateway',
+            'subscription_gateway_reference',
+            'subscription_payment_link',
+            'subscription_notes',
             'transfer_certificate_prefix', 'transfer_certificate_last_no'
         ];
 
@@ -311,6 +378,9 @@ if (!function_exists('schoolRegistrationSyncApprovedSchoolSettings')) {
         $fieldTypeMap = [
             'school_id' => 'i',
             'transfer_certificate_last_no' => 'i',
+            'attendance_period_duration_minutes' => 'i',
+            'attendance_auto_alert_enabled' => 'i',
+            'ads_enabled' => 'i',
         ];
         foreach ($fields as $field) {
             $values[] = $settings[$field] ?? '';

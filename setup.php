@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>School Management System - Setup</title>
+    <title><?php echo htmlspecialchars(APP_NAME); ?> - Setup</title>
 
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="login-header">
             <i class="bi bi-gear-fill" style="font-size: 4rem;"></i>
             <h3 class="mt-3">System Setup</h3>
-            <p class="mb-0">School Management System v<?php echo APP_VERSION; ?></p>
+            <p class="mb-0"><?php echo htmlspecialchars(APP_NAME); ?> v<?php echo APP_VERSION; ?></p>
         </div>
 
         <!-- Body -->
@@ -155,19 +155,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3">
                         <label for="full_name" class="form-label required">Full Name</label>
                         <input type="text" class="form-control" id="full_name" name="full_name"
-                               placeholder="Enter full name" required>
+                               placeholder="Enter full name" value="<?php echo htmlspecialchars($_POST['full_name'] ?? 'Admin User'); ?>" required>
                     </div>
 
                     <div class="mb-3">
                         <label for="username" class="form-label required">Username</label>
                         <input type="text" class="form-control" id="username" name="username"
-                               placeholder="Enter username" required>
+                               placeholder="Enter username" value="<?php echo htmlspecialchars($_POST['username'] ?? 'admin'); ?>" required>
                     </div>
 
                     <div class="mb-3">
                         <label for="email" class="form-label required">Email</label>
                         <input type="email" class="form-control" id="email" name="email"
-                               placeholder="Enter email" required>
+                               placeholder="Enter email" value="<?php echo htmlspecialchars($_POST['email'] ?? 'admin@school.com'); ?>" required>
                     </div>
 
                     <div class="mb-3">
@@ -179,14 +179,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3">
                         <label for="password" class="form-label required">Password</label>
                         <input type="password" class="form-control" id="password" name="password"
-                               placeholder="Enter password" required minlength="6">
+                               placeholder="Enter password" value="<?php echo htmlspecialchars($_POST['password'] ?? 'admin123'); ?>" required minlength="6">
                         <small class="text-muted">Minimum 6 characters</small>
                     </div>
 
                     <div class="mb-3">
                         <label for="confirm_password" class="form-label required">Confirm Password</label>
                         <input type="password" class="form-control" id="confirm_password" name="confirm_password"
-                               placeholder="Re-enter password" required minlength="6">
+                               placeholder="Re-enter password" value="<?php echo htmlspecialchars($_POST['confirm_password'] ?? 'admin123'); ?>" required minlength="6">
                     </div>
 
                     <div class="d-grid">
@@ -201,7 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="text-center">
                     <i class="bi bi-check-circle-fill text-success" style="font-size: 5rem;"></i>
                     <h4 class="mt-3">Setup Complete!</h4>
-                    <p class="text-muted">Your School Management System is ready to use.</p>
+                    <p class="text-muted">Your <?php echo htmlspecialchars(APP_NAME); ?> is ready to use.</p>
 
                     <div class="alert alert-success text-start mt-4">
                         <strong>Next Steps:</strong>
@@ -225,7 +225,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <!-- Footer -->
         <div class="login-footer">
-            <p class="mb-0">School Management System &copy; <?php echo date('Y'); ?></p>
+            <p class="mb-0"><?php echo htmlspecialchars(APP_NAME); ?> &copy; <?php echo date('Y'); ?></p>
         </div>
     </div>
 </div>

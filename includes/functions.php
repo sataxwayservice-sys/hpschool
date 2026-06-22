@@ -142,6 +142,11 @@ if (!function_exists('ensureSchoolSettingsSchema')) {
         $ensureColumn('school_settings', 'principal_signature', "principal_signature varchar(255) DEFAULT NULL AFTER class_teacher_signature");
         $ensureColumn('school_settings', 'transfer_certificate_prefix', "transfer_certificate_prefix varchar(30) DEFAULT 'TC/' AFTER receipt_prefix");
         $ensureColumn('school_settings', 'transfer_certificate_last_no', "transfer_certificate_last_no int(11) NOT NULL DEFAULT 0 AFTER transfer_certificate_prefix");
+        $ensureColumn('school_settings', 'attendance_scan_mode', "attendance_scan_mode enum('daily','period') NOT NULL DEFAULT 'daily' AFTER transfer_certificate_last_no");
+        $ensureColumn('school_settings', 'attendance_class_start_time', "attendance_class_start_time time NOT NULL DEFAULT '08:00:00' AFTER attendance_scan_mode");
+        $ensureColumn('school_settings', 'attendance_period_duration_minutes', "attendance_period_duration_minutes int(11) NOT NULL DEFAULT 45 AFTER attendance_class_start_time");
+        $ensureColumn('school_settings', 'attendance_auto_alert_enabled', "attendance_auto_alert_enabled tinyint(1) NOT NULL DEFAULT 1 AFTER attendance_period_duration_minutes");
+        $ensureColumn('school_settings', 'attendance_absent_message_template', "attendance_absent_message_template text DEFAULT NULL AFTER attendance_auto_alert_enabled");
         $ensureColumn('school_settings', 'company_name', "company_name varchar(200) DEFAULT NULL AFTER school_name");
         $ensureColumn('school_settings', 'company_tagline', "company_tagline varchar(150) DEFAULT NULL AFTER company_name");
         $ensureColumn('school_settings', 'company_address', "company_address text DEFAULT NULL AFTER company_tagline");
@@ -150,9 +155,22 @@ if (!function_exists('ensureSchoolSettingsSchema')) {
         $ensureColumn('school_settings', 'company_website', "company_website varchar(255) DEFAULT NULL AFTER company_email");
         $ensureColumn('school_settings', 'company_logo', "company_logo varchar(255) DEFAULT NULL AFTER company_website");
         $ensureColumn('school_settings', 'enabled_roles', "enabled_roles text DEFAULT NULL AFTER company_logo");
+        $ensureColumn('school_settings', 'student_add_limit', "student_add_limit int(11) NOT NULL DEFAULT 0 AFTER enabled_roles");
+        $ensureColumn('school_settings', 'subscription_plan', "subscription_plan enum('free','premium','enterprise') NOT NULL DEFAULT 'free' AFTER enabled_roles");
+        $ensureColumn('school_settings', 'subscription_price', "subscription_price decimal(10,2) NOT NULL DEFAULT 0.00 AFTER subscription_plan");
+        $ensureColumn('school_settings', 'subscription_currency_code', "subscription_currency_code varchar(10) DEFAULT 'INR' AFTER subscription_price");
+        $ensureColumn('school_settings', 'subscription_billing_cycle', "subscription_billing_cycle enum('monthly','quarterly','yearly','custom') NOT NULL DEFAULT 'monthly' AFTER subscription_currency_code");
+        $ensureColumn('school_settings', 'subscription_status', "subscription_status enum('active','pending','expired','cancelled','trial') NOT NULL DEFAULT 'active' AFTER subscription_billing_cycle");
+        $ensureColumn('school_settings', 'ads_enabled', "ads_enabled tinyint(1) NOT NULL DEFAULT 1 AFTER subscription_status");
+        $ensureColumn('school_settings', 'subscription_started_at', "subscription_started_at datetime DEFAULT NULL AFTER ads_enabled");
+        $ensureColumn('school_settings', 'subscription_expires_at', "subscription_expires_at datetime DEFAULT NULL AFTER subscription_started_at");
+        $ensureColumn('school_settings', 'subscription_gateway', "subscription_gateway varchar(50) DEFAULT 'manual' AFTER subscription_expires_at");
+        $ensureColumn('school_settings', 'subscription_gateway_reference', "subscription_gateway_reference varchar(150) DEFAULT NULL AFTER subscription_gateway");
+        $ensureColumn('school_settings', 'subscription_payment_link', "subscription_payment_link text DEFAULT NULL AFTER subscription_gateway_reference");
+        $ensureColumn('school_settings', 'subscription_notes', "subscription_notes text DEFAULT NULL AFTER subscription_payment_link");
 
         $loginTextColumns = [
-            'login_brand_subtitle' => "login_brand_subtitle varchar(150) DEFAULT 'School Management System' AFTER transfer_certificate_last_no",
+            'login_brand_subtitle' => "login_brand_subtitle varchar(150) DEFAULT '" . APP_NAME . "' AFTER transfer_certificate_last_no",
             'login_hero_title' => "login_hero_title varchar(255) DEFAULT 'Secure access for staff, records, and school operations.' AFTER login_brand_subtitle",
             'login_hero_subtitle' => "login_hero_subtitle text DEFAULT NULL AFTER login_hero_title",
             'login_pill_1' => "login_pill_1 varchar(120) DEFAULT 'Role-based access' AFTER login_hero_subtitle",
@@ -213,6 +231,15 @@ if (!function_exists('ensureStudentSchema')) {
         };
 
         $ensureColumn('students', 'school_id', "school_id int(11) DEFAULT NULL AFTER student_id");
+        $ensureColumn('students', 'attendance_auto_alert_disabled', "attendance_auto_alert_disabled tinyint(1) NOT NULL DEFAULT 0 AFTER school_id");
+
+        $remindersTable = $conn->query("SHOW TABLES LIKE 'student_reminders'");
+        if ($remindersTable && $remindersTable->num_rows > 0) {
+            $ensureColumn('student_reminders', 'reminder_type', "reminder_type varchar(50) NOT NULL DEFAULT 'General' AFTER reminder_text");
+            $ensureColumn('student_reminders', 'due_date', "due_date date DEFAULT NULL AFTER priority");
+            $ensureColumn('student_reminders', 'status', "status enum('Active','Resolved') NOT NULL DEFAULT 'Active' AFTER is_resolved");
+            $ensureColumn('student_reminders', 'updated_at', "updated_at timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP AFTER created_at");
+        }
 
         $indexCheck = $conn->query("SHOW INDEX FROM students WHERE Key_name = 'idx_student_school_id'");
         if (!$indexCheck || $indexCheck->num_rows === 0) {
@@ -222,6 +249,311 @@ if (!function_exists('ensureStudentSchema')) {
         }
 
         return true;
+    }
+}
+
+if (!function_exists('ensureFeeModuleSchema')) {
+    function ensureFeeModuleSchema() {
+        static $checked = false;
+
+        if ($checked) {
+            return true;
+        }
+
+        $checked = true;
+
+        $conn = getDbConnection();
+        if (!$conn) {
+            return false;
+        }
+
+        $ensureColumn = function (string $table, string $column, string $ddl) use ($conn) {
+            $result = $conn->query("SHOW COLUMNS FROM `$table` LIKE '" . $conn->real_escape_string($column) . "'");
+            if (!$result || $result->num_rows === 0) {
+                if (!$conn->query("ALTER TABLE `$table` ADD COLUMN $ddl")) {
+                    error_log("Fee schema update failed for $table.$column: " . $conn->error);
+                }
+            }
+        };
+
+        $ensureIndex = function (string $table, string $indexName, string $indexSql) use ($conn) {
+            $result = $conn->query("SHOW INDEX FROM `$table` WHERE Key_name = '" . $conn->real_escape_string($indexName) . "'");
+            if (!$result || $result->num_rows === 0) {
+                if (!$conn->query("ALTER TABLE `$table` ADD INDEX `$indexName` ($indexSql)")) {
+                    error_log("Fee schema index update failed for $table.$indexName: " . $conn->error);
+                }
+            }
+        };
+
+        $ensureColumn('fee_heads', 'school_id', "school_id int(11) DEFAULT NULL AFTER fee_head_id");
+        $ensureColumn('fee_structure', 'school_id', "school_id int(11) DEFAULT NULL AFTER fee_structure_id");
+
+        $ensureIndex('fee_heads', 'idx_fee_heads_school_id', '`school_id`');
+        $ensureIndex('fee_structure', 'idx_fee_structure_school_id', '`school_id`');
+
+        // Backfill fee structure rows from their linked student so existing school data stays visible.
+        $conn->query(
+            "UPDATE fee_structure fs
+             JOIN students s ON s.student_id = fs.student_id
+             SET fs.school_id = COALESCE(fs.school_id, s.school_id)
+             WHERE (fs.school_id IS NULL OR fs.school_id = 0)
+               AND COALESCE(s.school_id, 0) > 0"
+        );
+
+        // Attach each fee head to the single school that uses it, when the usage is unambiguous.
+        $conn->query(
+            "UPDATE fee_heads fh
+             JOIN (
+                 SELECT fee_head_id, MAX(school_id) AS school_id
+                 FROM fee_structure
+                 WHERE is_active = 1 AND COALESCE(school_id, 0) > 0
+                 GROUP BY fee_head_id
+                 HAVING COUNT(DISTINCT school_id) = 1
+             ) scoped ON scoped.fee_head_id = fh.fee_head_id
+             SET fh.school_id = scoped.school_id
+             WHERE fh.school_id IS NULL OR fh.school_id = 0"
+        );
+
+        return true;
+    }
+}
+
+if (!function_exists('ensureAttendanceSchema')) {
+    function ensureAttendanceSchema() {
+        static $checked = false;
+
+        if ($checked) {
+            return true;
+        }
+
+        $checked = true;
+
+        $conn = getDbConnection();
+        if (!$conn) {
+            return false;
+        }
+
+        $conn->query(
+            "CREATE TABLE IF NOT EXISTS `student_attendance` (
+                `attendance_id` int(11) NOT NULL AUTO_INCREMENT,
+                `school_id` int(11) NOT NULL DEFAULT 0,
+                `student_id` int(11) NOT NULL,
+                `attendance_date` date NOT NULL,
+                `attendance_period_no` int(11) NOT NULL DEFAULT 0,
+                `status` varchar(20) NOT NULL DEFAULT 'Present',
+                `marked_by` int(11) DEFAULT NULL,
+                `qr_token` text DEFAULT NULL,
+                `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`attendance_id`),
+                UNIQUE KEY `idx_student_attendance_unique` (`school_id`, `student_id`, `attendance_date`, `attendance_period_no`),
+                KEY `idx_student_attendance_school_date` (`school_id`, `attendance_date`),
+                KEY `idx_student_attendance_student` (`student_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+
+        $periodColumnCheck = $conn->query("SHOW COLUMNS FROM `student_attendance` LIKE 'attendance_period_no'");
+        if ($periodColumnCheck && $periodColumnCheck->num_rows > 0) {
+            $indexColumns = [];
+            $indexResult = $conn->query(
+                "SELECT COLUMN_NAME
+                 FROM information_schema.statistics
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'student_attendance'
+                   AND index_name = 'idx_student_attendance_unique'
+                 ORDER BY SEQ_IN_INDEX"
+            );
+
+            if ($indexResult) {
+                while ($indexRow = $indexResult->fetch_assoc()) {
+                    $indexColumns[] = $indexRow['COLUMN_NAME'] ?? '';
+                }
+            }
+
+            $desiredColumns = ['school_id', 'student_id', 'attendance_date', 'attendance_period_no'];
+            if (empty($indexColumns)) {
+                if (!$conn->query("ALTER TABLE `student_attendance` ADD UNIQUE KEY `idx_student_attendance_unique` (`school_id`, `student_id`, `attendance_date`, `attendance_period_no`)")) {
+                    error_log('Attendance schema unique key creation failed: ' . $conn->error);
+                }
+            } elseif ($indexColumns !== $desiredColumns) {
+                $conn->query("ALTER TABLE `student_attendance` DROP INDEX `idx_student_attendance_unique`");
+                if (!$conn->query("ALTER TABLE `student_attendance` ADD UNIQUE KEY `idx_student_attendance_unique` (`school_id`, `student_id`, `attendance_date`, `attendance_period_no`)")) {
+                    error_log('Attendance schema unique key update failed: ' . $conn->error);
+                }
+            }
+        }
+
+        return true;
+    }
+}
+
+if (!function_exists('attendanceNormalizeTimeValue')) {
+    function attendanceNormalizeTimeValue($value, $fallback = '08:00:00') {
+        $value = trim((string) $value);
+        $fallback = trim((string) $fallback);
+        if ($fallback === '') {
+            $fallback = '08:00:00';
+        }
+
+        if ($value === '') {
+            return $fallback;
+        }
+
+        if (preg_match('/^\d{2}:\d{2}$/', $value)) {
+            return $value . ':00';
+        }
+
+        if (preg_match('/^\d{2}:\d{2}:\d{2}$/', $value)) {
+            return $value;
+        }
+
+        $timestamp = strtotime($value);
+        if ($timestamp !== false) {
+            return date('H:i:s', $timestamp);
+        }
+
+        return $fallback;
+    }
+}
+
+if (!function_exists('attendanceGetScanContext')) {
+    function attendanceGetScanContext(array $schoolSettings = [], ?DateTimeInterface $moment = null): array {
+        $mode = strtolower(trim((string)($schoolSettings['attendance_scan_mode'] ?? 'daily')));
+        if (!in_array($mode, ['daily', 'period'], true)) {
+            $mode = 'daily';
+        }
+
+        if ($mode === 'daily') {
+            return [
+                'mode' => 'daily',
+                'period_no' => 0,
+                'period_label' => 'Daily Attendance',
+                'period_start' => null,
+                'period_end' => null,
+            ];
+        }
+
+        $moment = $moment ?: new DateTimeImmutable('now');
+        $startTime = attendanceNormalizeTimeValue($schoolSettings['attendance_class_start_time'] ?? '08:00:00', '08:00:00');
+        $durationMinutes = intval($schoolSettings['attendance_period_duration_minutes'] ?? 45);
+        if ($durationMinutes <= 0) {
+            $durationMinutes = 45;
+        }
+
+        $startAt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $moment->format('Y-m-d') . ' ' . $startTime);
+        if (!$startAt) {
+            $startAt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $moment->format('Y-m-d') . ' 08:00:00');
+        }
+        if (!$startAt) {
+            $startAt = $moment;
+        }
+
+        $minutesSinceStart = (int) floor(($moment->getTimestamp() - $startAt->getTimestamp()) / 60);
+        if ($minutesSinceStart < 0) {
+            $minutesSinceStart = 0;
+        }
+
+        $periodNo = intdiv($minutesSinceStart, $durationMinutes) + 1;
+        $periodStart = $startAt->modify('+' . (($periodNo - 1) * $durationMinutes) . ' minutes');
+        $periodEnd = $periodStart->modify('+' . $durationMinutes . ' minutes');
+
+        return [
+            'mode' => 'period',
+            'period_no' => $periodNo,
+            'period_label' => 'Period ' . $periodNo,
+            'period_start' => $periodStart->format('h:i A'),
+            'period_end' => $periodEnd->format('h:i A'),
+        ];
+    }
+}
+
+if (!function_exists('attendanceGetDefaultAbsentSmsTemplate')) {
+    function attendanceGetDefaultAbsentSmsTemplate() {
+        return 'Dear Parent, {student_details} was marked ABSENT {period_text} on {date} at {school_name}. Please contact the school office if this needs correction.';
+    }
+}
+
+if (!function_exists('attendanceBuildAbsentSmsMessage')) {
+    function attendanceBuildAbsentSmsMessage(array $student, $attendanceDate, array $schoolSettings = [], array $attendanceContext = []) {
+        $studentName = trim((string)($student['student_name'] ?? 'Student'));
+        if ($studentName === '') {
+            $studentName = 'Student';
+        }
+
+        $admissionNo = trim((string)($student['admission_no'] ?? ''));
+        if ($admissionNo === '') {
+            $admissionNo = 'N/A';
+        }
+
+        $rollNo = trim((string)($student['roll_no'] ?? ''));
+        if ($rollNo === '') {
+            $rollNo = 'N/A';
+        }
+
+        $fatherName = trim((string)($student['father_name'] ?? ''));
+        $className = trim((string)($student['class_name'] ?? ''));
+        $sectionName = trim((string)($student['section_name'] ?? ''));
+        $classDisplay = trim($className . ($sectionName !== '' ? ' - ' . $sectionName : ''));
+        if ($classDisplay === '') {
+            $classDisplay = 'N/A';
+        }
+
+        $studentDetails = implode('; ', array_filter([
+            'Name: ' . $studentName,
+            'Adm No.: ' . $admissionNo,
+            'Roll No.: ' . $rollNo,
+            'Class: ' . $classDisplay,
+            'Father: ' . ($fatherName !== '' ? $fatherName : 'N/A'),
+        ], static function ($part) {
+            return trim((string) $part) !== '';
+        }));
+
+        $schoolName = trim((string)($schoolSettings['school_name'] ?? APP_NAME));
+        if ($schoolName === '') {
+            $schoolName = APP_NAME;
+        }
+
+        $attendanceDate = trim((string)$attendanceDate);
+        $dateLabel = $attendanceDate !== '' ? date('d M Y', strtotime($attendanceDate)) : date('d M Y');
+
+        $periodMode = strtolower(trim((string)($attendanceContext['mode'] ?? 'daily'))) === 'period';
+        $periodLabel = trim((string)($attendanceContext['period_label'] ?? ''));
+        $periodStart = trim((string)($attendanceContext['period_start'] ?? ''));
+        $periodEnd = trim((string)($attendanceContext['period_end'] ?? ''));
+
+        $periodText = '';
+        if ($periodMode && $periodLabel !== '') {
+            $periodText = 'in ' . $periodLabel;
+            if ($periodStart !== '' && $periodEnd !== '') {
+                $periodText .= ' (' . $periodStart . ' - ' . $periodEnd . ')';
+            }
+        }
+
+        $template = trim((string)($schoolSettings['attendance_absent_message_template'] ?? ''));
+        if ($template === '') {
+            $template = attendanceGetDefaultAbsentSmsTemplate();
+        }
+
+        $message = strtr($template, [
+            '{student_name}' => $studentName,
+            '{admission_no}' => $admissionNo,
+            '{roll_no}' => $rollNo,
+            '{father_name}' => $fatherName !== '' ? $fatherName : 'N/A',
+            '{class_name}' => $className !== '' ? $className : 'N/A',
+            '{section_name}' => $sectionName !== '' ? $sectionName : 'N/A',
+            '{class_display}' => $classDisplay,
+            '{student_details}' => $studentDetails !== '' ? $studentDetails : 'Student details not available',
+            '{school_name}' => $schoolName,
+            '{date}' => $dateLabel,
+            '{date_iso}' => $attendanceDate !== '' ? $attendanceDate : date('Y-m-d'),
+            '{period_text}' => $periodText,
+            '{period_label}' => $periodLabel !== '' ? $periodLabel : 'Daily Attendance',
+            '{period_start}' => $periodStart !== '' ? $periodStart : '--',
+            '{period_end}' => $periodEnd !== '' ? $periodEnd : '--',
+        ]);
+
+        $message = preg_replace('/\s+/u', ' ', (string) $message);
+        return trim((string) $message);
     }
 }
 
@@ -379,6 +711,81 @@ if (!function_exists('getRolePermissionsForSchool')) {
     }
 }
 
+if (!function_exists('getRolePermissionListForSchool')) {
+    function getRolePermissionListForSchool($roleName, $schoolId = null) {
+        $row = function_exists('getRolePermissionsForSchool')
+            ? getRolePermissionsForSchool($roleName, $schoolId)
+            : null;
+
+        if (!$row || empty($row['permissions'])) {
+            return [];
+        }
+
+        $decodedPermissions = json_decode((string) $row['permissions'], true);
+        if (!is_array($decodedPermissions)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_map(static function ($permission) {
+            return trim((string) $permission);
+        }, $decodedPermissions)));
+    }
+}
+
+if (!function_exists('setRolePermissionForSchool')) {
+    function setRolePermissionForSchool($roleName, $schoolId, $permissionKey, $enabled) {
+        $roleName = trim((string) $roleName);
+        $permissionKey = trim((string) $permissionKey);
+        $schoolId = intval($schoolId);
+        $enabled = (bool) $enabled;
+
+        if ($roleName === '' || $permissionKey === '' || $schoolId <= 0) {
+            return false;
+        }
+
+        ensureRolePermissionsSchema();
+
+        $permissions = function_exists('getRolePermissionListForSchool')
+            ? getRolePermissionListForSchool($roleName, $schoolId)
+            : [];
+
+        if ($enabled) {
+            if (!in_array($permissionKey, $permissions, true)) {
+                $permissions[] = $permissionKey;
+            }
+        } else {
+            $permissions = array_values(array_filter($permissions, static function ($permission) use ($permissionKey) {
+                return trim((string) $permission) !== $permissionKey;
+            }));
+        }
+
+        $permissionsJson = json_encode(array_values(array_unique($permissions)));
+        if ($permissionsJson === false) {
+            return false;
+        }
+
+        $existingRow = fetchOne(
+            "SELECT id FROM role_permissions WHERE school_id = ? AND role_name = ? LIMIT 1",
+            'is',
+            [$schoolId, $roleName]
+        );
+
+        if ($existingRow) {
+            return executeQuery(
+                "UPDATE role_permissions SET permissions = ?, updated_at = NOW() WHERE school_id = ? AND role_name = ?",
+                'sis',
+                [$permissionsJson, $schoolId, $roleName]
+            ) !== false;
+        }
+
+        return executeQuery(
+            "INSERT INTO role_permissions (school_id, role_name, permissions, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
+            'iss',
+            [$schoolId, $roleName, $permissionsJson]
+        ) !== false;
+    }
+}
+
 if (!function_exists('getRolePermissionKeysForModule')) {
     function getRolePermissionKeysForModule($module, $action) {
         $module = strtolower(trim((string) $module));
@@ -469,6 +876,13 @@ function getCurrentSchoolId() {
     }
 
     $user = function_exists('getCurrentUser') ? getCurrentUser() : null;
+    $role = strtolower(trim((string)($user['role'] ?? '')));
+
+    if ($role === 'super_admin') {
+        $resolvedSchoolId = 0;
+        return $resolvedSchoolId;
+    }
+
     if (!empty($user['school_id'])) {
         $resolvedSchoolId = intval($user['school_id']);
         return $resolvedSchoolId;
@@ -480,7 +894,6 @@ function getCurrentSchoolId() {
     }
 
     $userId = intval($user['user_id'] ?? 0);
-    $role = strtolower(trim((string)($user['role'] ?? '')));
 
     if ($userId > 0 && $role === 'admin') {
         $school = null;
@@ -549,7 +962,7 @@ function getSchoolSettings() {
             if (!$settings && $school && function_exists('schoolRegistrationMapSchoolToSettings')) {
                 $settings = schoolRegistrationMapSchoolToSettings($school, [
                     'school_id' => $schoolId,
-                    'school_name' => trim((string)($school['school_name'] ?? 'My School')),
+                    'school_name' => trim((string)($school['school_name'] ?? '')) ?: APP_NAME,
                     'school_address' => trim((string)($school['school_address'] ?? '')),
                     'school_phone' => trim((string)($school['school_phone'] ?? ($school['admin_mobile'] ?? ''))),
                     'school_email' => trim((string)($school['school_email'] ?? ($school['admin_email'] ?? ''))),
@@ -558,15 +971,10 @@ function getSchoolSettings() {
         }
     }
 
-    if (!$settings && $schoolId <= 0) {
-        $query = "SELECT * FROM school_settings ORDER BY updated_at DESC, setting_id DESC LIMIT 1";
-        $settings = fetchOne($query);
-    }
-
     if (!$settings) {
         // Return default settings
         $settings = [
-                'school_name' => 'My School',
+                'school_name' => APP_NAME,
                 'company_name' => '',
                 'company_tagline' => '',
                 'company_address' => '',
@@ -575,6 +983,19 @@ function getSchoolSettings() {
                 'company_website' => '',
                 'company_logo' => '',
                 'enabled_roles' => json_encode(['admin', 'accountant', 'clerk', 'teacher', 'parent']),
+                'student_add_limit' => 0,
+                'subscription_plan' => 'free',
+                'subscription_price' => '0.00',
+                'subscription_currency_code' => 'INR',
+                'subscription_billing_cycle' => 'monthly',
+                'subscription_status' => 'active',
+                'ads_enabled' => 1,
+                'subscription_started_at' => null,
+                'subscription_expires_at' => null,
+                'subscription_gateway' => 'manual',
+                'subscription_gateway_reference' => '',
+                'subscription_payment_link' => '',
+                'subscription_notes' => '',
                 'school_address' => '',
                 'school_phone' => '',
                 'school_email' => '',
@@ -589,7 +1010,12 @@ function getSchoolSettings() {
                 'receipt_prefix' => 'REC',
                 'transfer_certificate_prefix' => 'TC/',
                 'transfer_certificate_last_no' => 0,
-                'login_brand_subtitle' => 'School Management System',
+                'attendance_scan_mode' => 'daily',
+                'attendance_class_start_time' => '08:00:00',
+                'attendance_period_duration_minutes' => 45,
+                'attendance_auto_alert_enabled' => 1,
+                'attendance_absent_message_template' => 'Dear Parent, your ward {student_name} (Adm No. {admission_no}) was marked ABSENT {period_text} on {date} at {school_name}. Please contact the school office if this needs correction.',
+                'login_brand_subtitle' => APP_NAME,
                 'login_hero_title' => 'Secure access for staff, records, and school operations.',
                 'login_hero_subtitle' => 'Sign in to manage admissions, fees, reports, marks, documents, and daily workflows from one premium school ERP interface.',
                 'login_pill_1' => 'Role-based access',
@@ -618,7 +1044,7 @@ function getSchoolSettings() {
                 'currency_symbol' => '₹'
             ];
     } else {
-            $settings['school_name'] = trim((string)($settings['school_name'] ?? 'My School'));
+            $settings['school_name'] = trim((string)($settings['school_name'] ?? '')) ?: APP_NAME;
             $settings['company_name'] = trim((string)($settings['company_name'] ?? ''));
             $settings['company_tagline'] = trim((string)($settings['company_tagline'] ?? ''));
             $settings['company_address'] = trim((string)($settings['company_address'] ?? ''));
@@ -638,8 +1064,41 @@ function getSchoolSettings() {
                 $settings['teacher_signature'] = $settings['class_teacher_signature'];
             }
 
+            $settings['subscription_plan'] = trim((string)($settings['subscription_plan'] ?? 'free'));
+            $settings['subscription_price'] = floatval($settings['subscription_price'] ?? 0);
+            $settings['subscription_currency_code'] = trim((string)($settings['subscription_currency_code'] ?? 'INR'));
+            $settings['subscription_billing_cycle'] = trim((string)($settings['subscription_billing_cycle'] ?? 'monthly'));
+            $settings['subscription_status'] = trim((string)($settings['subscription_status'] ?? 'active'));
+            $settings['ads_enabled'] = intval($settings['ads_enabled'] ?? 1);
+            $settings['subscription_started_at'] = $settings['subscription_started_at'] ?? null;
+            $settings['subscription_expires_at'] = $settings['subscription_expires_at'] ?? null;
+            $settings['subscription_gateway'] = trim((string)($settings['subscription_gateway'] ?? 'manual'));
+            $settings['subscription_gateway_reference'] = trim((string)($settings['subscription_gateway_reference'] ?? ''));
+            $settings['subscription_payment_link'] = trim((string)($settings['subscription_payment_link'] ?? ''));
+            $settings['subscription_notes'] = trim((string)($settings['subscription_notes'] ?? ''));
+            $settings['attendance_scan_mode'] = trim((string)($settings['attendance_scan_mode'] ?? 'daily'));
+            if (!in_array($settings['attendance_scan_mode'], ['daily', 'period'], true)) {
+                $settings['attendance_scan_mode'] = 'daily';
+            }
+            $settings['attendance_class_start_time'] = attendanceNormalizeTimeValue($settings['attendance_class_start_time'] ?? '08:00:00', '08:00:00');
+            $settings['attendance_period_duration_minutes'] = intval($settings['attendance_period_duration_minutes'] ?? 45);
+            if ($settings['attendance_period_duration_minutes'] <= 0) {
+                $settings['attendance_period_duration_minutes'] = 45;
+            }
+            $settings['attendance_auto_alert_enabled'] = intval($settings['attendance_auto_alert_enabled'] ?? 1);
+            $settings['attendance_absent_message_template'] = trim((string)($settings['attendance_absent_message_template'] ?? ''));
+            $legacyAbsentTemplate = 'Dear Parent, your ward {student_name} (Adm No. {admission_no}) was marked ABSENT {period_text} on {date} at {school_name}. Please contact the school office if this needs correction.';
+            if ($settings['attendance_absent_message_template'] === '' || $settings['attendance_absent_message_template'] === $legacyAbsentTemplate) {
+                $settings['attendance_absent_message_template'] = attendanceGetDefaultAbsentSmsTemplate();
+            }
+            $settings['student_add_limit'] = intval($settings['student_add_limit'] ?? 0);
+            $settings['login_brand_subtitle'] = trim((string)($settings['login_brand_subtitle'] ?? APP_NAME));
+            if ($settings['login_brand_subtitle'] === '' || strtolower($settings['login_brand_subtitle']) === 'school management system') {
+                $settings['login_brand_subtitle'] = APP_NAME;
+            }
+
             $loginDefaults = [
-                'login_brand_subtitle' => 'School Management System',
+                'login_brand_subtitle' => APP_NAME,
                 'login_hero_title' => 'Secure access for staff, records, and school operations.',
                 'login_hero_subtitle' => 'Sign in to manage admissions, fees, reports, marks, documents, and daily workflows from one premium school ERP interface.',
                 'login_pill_1' => 'Role-based access',
@@ -712,6 +1171,8 @@ function getSchoolSettingsBySchoolId($schoolId) {
         return null;
     }
 
+    ensureSchoolSettingsSchema();
+
     $settings = fetchOne(
         "SELECT * FROM school_settings WHERE school_id = ? ORDER BY updated_at DESC, setting_id DESC LIMIT 1",
         'i',
@@ -754,6 +1215,385 @@ function getSchoolEnabledRoles($schoolId) {
     }));
 
     return !empty($cleanRoles) ? $cleanRoles : $defaultRoles;
+}
+
+/**
+ * Get the current subscription snapshot for a school.
+ *
+ * @param int|null $schoolId
+ * @return array
+ */
+function getSchoolSubscriptionDetails($schoolId = null) {
+    $schoolId = $schoolId !== null ? intval($schoolId) : intval(getCurrentSchoolId());
+    if ($schoolId <= 0) {
+        return [
+            'subscription_plan' => 'free',
+            'subscription_price' => 0,
+            'subscription_currency_code' => 'INR',
+            'subscription_billing_cycle' => 'monthly',
+            'subscription_status' => 'active',
+            'ads_enabled' => 0,
+            'subscription_started_at' => null,
+            'subscription_expires_at' => null,
+            'subscription_gateway' => 'manual',
+            'subscription_gateway_reference' => '',
+            'subscription_payment_link' => '',
+            'subscription_notes' => '',
+        ];
+    }
+
+    $settings = getSchoolSettingsBySchoolId($schoolId);
+
+    if (!$settings) {
+        return [
+            'subscription_plan' => 'free',
+            'subscription_price' => 0,
+            'subscription_currency_code' => 'INR',
+            'subscription_billing_cycle' => 'monthly',
+            'subscription_status' => 'active',
+            'ads_enabled' => 1,
+            'subscription_started_at' => null,
+            'subscription_expires_at' => null,
+            'subscription_gateway' => 'manual',
+            'subscription_gateway_reference' => '',
+            'subscription_payment_link' => '',
+            'subscription_notes' => '',
+        ];
+    }
+
+    return [
+        'subscription_plan' => trim((string) ($settings['subscription_plan'] ?? 'free')),
+        'subscription_price' => floatval($settings['subscription_price'] ?? 0),
+        'subscription_currency_code' => trim((string) ($settings['subscription_currency_code'] ?? 'INR')),
+        'subscription_billing_cycle' => trim((string) ($settings['subscription_billing_cycle'] ?? 'monthly')),
+        'subscription_status' => trim((string) ($settings['subscription_status'] ?? 'active')),
+        'ads_enabled' => intval($settings['ads_enabled'] ?? 1),
+        'subscription_started_at' => $settings['subscription_started_at'] ?? null,
+        'subscription_expires_at' => $settings['subscription_expires_at'] ?? null,
+        'subscription_gateway' => trim((string) ($settings['subscription_gateway'] ?? 'manual')),
+        'subscription_gateway_reference' => trim((string) ($settings['subscription_gateway_reference'] ?? '')),
+        'subscription_payment_link' => trim((string) ($settings['subscription_payment_link'] ?? '')),
+        'subscription_notes' => trim((string) ($settings['subscription_notes'] ?? '')),
+    ];
+}
+
+if (!function_exists('getSubscriptionPlanCatalog')) {
+    function getSubscriptionPlanCatalog() {
+        return [
+            'free' => [
+                'key' => 'free',
+                'label' => 'Free Plan',
+                'subtitle' => 'Starter access with ads enabled.',
+                'description' => 'Best for schools that want to stay on the free tier.',
+                'badge' => 'Ads enabled',
+                'variant' => 'secondary',
+                'icon' => 'bi-gift',
+                'features' => [
+                    'Promotional ads remain visible',
+                    'Basic school dashboard access',
+                    'No payment required',
+                ],
+                'requires_payment' => false,
+            ],
+            'premium' => [
+                'key' => 'premium',
+                'label' => 'Premium Plan',
+                'subtitle' => 'Ad-free school experience.',
+                'description' => 'Upgrade for a cleaner portal and premium presentation.',
+                'badge' => 'Most popular',
+                'variant' => 'primary',
+                'icon' => 'bi-stars',
+                'features' => [
+                    'Promotional ads are hidden',
+                    'Premium portal branding',
+                    'Configured payment gateway',
+                ],
+                'requires_payment' => true,
+            ],
+            'enterprise' => [
+                'key' => 'enterprise',
+                'label' => 'Enterprise Plan',
+                'subtitle' => 'Custom setup for larger schools.',
+                'description' => 'Ideal for schools needing custom billing or dedicated support.',
+                'badge' => 'Custom',
+                'variant' => 'dark',
+                'icon' => 'bi-building-gear',
+                'features' => [
+                    'Custom pricing and support',
+                    'Advanced school-level control',
+                    'Payment flow managed by Super Admin',
+                ],
+                'requires_payment' => true,
+            ],
+        ];
+    }
+}
+
+if (!function_exists('getSubscriptionPlanMeta')) {
+    function getSubscriptionPlanMeta($plan) {
+        $catalog = getSubscriptionPlanCatalog();
+        $key = strtolower(trim((string)$plan));
+        return $catalog[$key] ?? $catalog['free'];
+    }
+}
+
+if (!function_exists('getSchoolSubscriptionPaymentLink')) {
+    function getSchoolSubscriptionPaymentLink($schoolId = null) {
+        $schoolId = $schoolId !== null ? intval($schoolId) : intval(getCurrentSchoolId());
+        if ($schoolId <= 0) {
+            return '';
+        }
+
+        $details = getSchoolSubscriptionDetails($schoolId);
+        $paymentLink = trim((string)($details['subscription_payment_link'] ?? ''));
+        if ($paymentLink !== '') {
+            return $paymentLink;
+        }
+
+        $settings = getSchoolSettingsBySchoolId($schoolId);
+        if (!$settings) {
+            return '';
+        }
+
+        $gateway = strtolower(trim((string)($details['subscription_gateway'] ?? 'manual')));
+        $price = floatval($details['subscription_price'] ?? 0);
+        if ($gateway !== 'upi' || $price <= 0) {
+            return '';
+        }
+
+        $upiId = trim((string)($settings['upi_id'] ?? ''));
+        if ($upiId === '') {
+            return '';
+        }
+
+        $schoolName = trim((string)($settings['school_name'] ?? ''));
+        $recipient = trim((string)($settings['payment_recipient_name'] ?? $schoolName));
+        $currencyCode = trim((string)($details['subscription_currency_code'] ?? 'INR')) ?: 'INR';
+
+        return 'upi://pay?pa=' . rawurlencode($upiId)
+            . '&pn=' . rawurlencode($recipient !== '' ? $recipient : $schoolName)
+            . '&am=' . number_format($price, 2, '.', '')
+            . '&cu=' . rawurlencode($currencyCode)
+            . '&tn=' . rawurlencode($schoolName . ' subscription');
+    }
+}
+
+/**
+ * Determine whether the current school should display ads/promotional banners.
+ *
+ * Free subscriptions keep ads on; premium and enterprise subscriptions hide them.
+ *
+ * @param int|null $schoolId
+ * @return bool
+ */
+function isSchoolAdsEnabled($schoolId = null) {
+    $subscription = getSchoolSubscriptionDetails($schoolId);
+    $status = strtolower(trim((string) ($subscription['subscription_status'] ?? 'active')));
+    $plan = strtolower(trim((string) ($subscription['subscription_plan'] ?? 'free')));
+
+    if (in_array($plan, ['premium', 'enterprise'], true) && $status === 'active') {
+        return false;
+    }
+
+    return intval($subscription['ads_enabled'] ?? 1) === 1;
+}
+
+if (!function_exists('ensureSchoolAdsSchema')) {
+    function ensureSchoolAdsSchema() {
+        static $checked = false;
+        if ($checked) {
+            return true;
+        }
+        $checked = true;
+
+        $conn = getDbConnection();
+        if (!$conn) {
+            return false;
+        }
+
+        $conn->query(
+            "CREATE TABLE IF NOT EXISTS school_ads (
+                ad_id int(11) NOT NULL AUTO_INCREMENT,
+                school_id int(11) NOT NULL DEFAULT 0,
+                placement varchar(50) NOT NULL DEFAULT 'header_banner',
+                ad_type enum('image','text','html') NOT NULL DEFAULT 'image',
+                title varchar(200) NOT NULL,
+                content_text text DEFAULT NULL,
+                content_html longtext DEFAULT NULL,
+                image_file varchar(255) DEFAULT NULL,
+                link_url varchar(255) DEFAULT NULL,
+                priority int(11) NOT NULL DEFAULT 0,
+                is_active tinyint(1) NOT NULL DEFAULT 1,
+                start_date date DEFAULT NULL,
+                end_date date DEFAULT NULL,
+                created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (ad_id),
+                KEY idx_school_ads_school_placement (school_id, placement, is_active, priority),
+                KEY idx_school_ads_school_id (school_id),
+                KEY idx_school_ads_dates (start_date, end_date)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+
+        return true;
+    }
+}
+
+/**
+ * Get the maximum number of students allowed for a school.
+ *
+ * @param int|null $schoolId
+ * @return int
+ */
+if (!function_exists('getSchoolStudentAddLimit')) {
+    function getSchoolStudentAddLimit($schoolId = null) {
+        $schoolId = $schoolId !== null ? intval($schoolId) : intval(getCurrentSchoolId());
+        if ($schoolId <= 0) {
+            return 0;
+        }
+
+        $settings = getSchoolSettingsBySchoolId($schoolId);
+        return intval($settings['student_add_limit'] ?? 0);
+    }
+}
+
+/**
+ * Get the count of active students for a school.
+ *
+ * @param int|null $schoolId
+ * @return int
+ */
+if (!function_exists('getSchoolActiveStudentCount')) {
+    function getSchoolActiveStudentCount($schoolId = null) {
+        $schoolId = $schoolId !== null ? intval($schoolId) : intval(getCurrentSchoolId());
+        if ($schoolId <= 0) {
+            return 0;
+        }
+
+        $row = fetchOne(
+            "SELECT COUNT(*) as total FROM students WHERE school_id = ? AND status = 'Active'",
+            'i',
+            [$schoolId]
+        );
+
+        return intval($row['total'] ?? 0);
+    }
+}
+
+/**
+ * Determine whether the student add limit has been reached.
+ *
+ * @param int|null $schoolId
+ * @param int $additionalStudents
+ * @return bool
+ */
+if (!function_exists('isSchoolStudentAddLimitReached')) {
+    function isSchoolStudentAddLimitReached($schoolId = null, $additionalStudents = 1) {
+        $limit = getSchoolStudentAddLimit($schoolId);
+        if ($limit <= 0) {
+            return false;
+        }
+
+        $currentCount = getSchoolActiveStudentCount($schoolId);
+        $additionalStudents = max(1, intval($additionalStudents));
+
+        return ($currentCount + $additionalStudents) > $limit;
+    }
+}
+
+if (!function_exists('setSchoolStudentAddLimit')) {
+    function setSchoolStudentAddLimit($schoolId, $limit) {
+        $schoolId = intval($schoolId);
+        $limit = max(0, intval($limit));
+
+        if ($schoolId <= 0) {
+            return false;
+        }
+
+        ensureSchoolSettingsSchema();
+
+        $settings = getSchoolSettingsBySchoolId($schoolId);
+        if ((!$settings || empty($settings['setting_id'])) && function_exists('schoolRegistrationSyncApprovedSchoolSettings')) {
+            $school = fetchOne("SELECT * FROM schools WHERE school_id = ? LIMIT 1", 'i', [$schoolId]);
+            if ($school) {
+                schoolRegistrationSyncApprovedSchoolSettings($school);
+                $settings = getSchoolSettingsBySchoolId($schoolId);
+            }
+        }
+
+        if (!$settings || empty($settings['setting_id'])) {
+            return false;
+        }
+
+        return executeQuery(
+            "UPDATE school_settings SET student_add_limit = ?, updated_at = NOW() WHERE setting_id = ?",
+            'ii',
+            [$limit, intval($settings['setting_id'])]
+        ) !== false;
+    }
+}
+
+if (!function_exists('getSchoolAdPlacements')) {
+    function getSchoolAdPlacements() {
+        return [
+            'header_banner' => 'Header Banner',
+            'dashboard_top' => 'Dashboard Top',
+            'login_page' => 'Login Page',
+            'fees_page' => 'Fees Page',
+            'reports_page' => 'Reports Page',
+            'student_portal' => 'Student Portal',
+        ];
+    }
+}
+
+if (!function_exists('getSchoolAdsForPlacement')) {
+    function getSchoolAdsForPlacement($schoolId = null, $placement = 'header_banner', $limit = 1, $includeInactive = false) {
+        ensureSchoolAdsSchema();
+
+        $schoolId = $schoolId !== null ? intval($schoolId) : intval(function_exists('getCurrentSchoolId') ? getCurrentSchoolId() : 0);
+        $placement = trim((string) $placement);
+        $limit = max(1, min(20, intval($limit)));
+
+        if ($schoolId <= 0) {
+            return [];
+        }
+
+        $query = "SELECT * FROM school_ads WHERE school_id = ?";
+        $types = 'i';
+        $params = [$schoolId];
+
+        if ($placement !== '') {
+            $query .= " AND placement = ?";
+            $types .= 's';
+            $params[] = $placement;
+        }
+
+        if (!$includeInactive) {
+            $query .= " AND is_active = 1";
+        }
+
+        $query .= " AND (start_date IS NULL OR start_date <= CURDATE())";
+        $query .= " AND (end_date IS NULL OR end_date >= CURDATE())";
+        $query .= " ORDER BY priority DESC, ad_id DESC LIMIT {$limit}";
+
+        return fetchAll($query, $types, $params);
+    }
+}
+
+if (!function_exists('getSchoolAdImageSrc')) {
+    function getSchoolAdImageSrc($filename = '') {
+        $filename = trim((string) $filename);
+        if ($filename === '') {
+            return '';
+        }
+
+        $path = AD_PATH . $filename;
+        if (!file_exists($path)) {
+            return '';
+        }
+
+        return APP_URL . '/assets/uploads/ads/' . rawurlencode($filename);
+    }
 }
 
 /**
@@ -1346,6 +2186,40 @@ function sanitizeNavigationUrl($url) {
 }
 
 /**
+ * Group navigation URLs by app area so back buttons can recover a sensible
+ * in-app target even when browser history is thin or unavailable.
+ *
+ * @param string $url
+ * @return string
+ */
+function getNavigationGroupFromUrl($url) {
+    $url = sanitizeNavigationUrl($url);
+    if ($url === '') {
+        return '';
+    }
+
+    $parts = parse_url($url);
+    $path = strtolower(trim((string)($parts['path'] ?? ''), '/'));
+    if ($path === '') {
+        return 'root';
+    }
+
+    $segments = array_values(array_filter(explode('/', $path), function ($item) {
+        return $item !== '';
+    }));
+
+    if (empty($segments)) {
+        return 'root';
+    }
+
+    if ($segments[0] === 'modules') {
+        return $segments[1] ?? 'modules';
+    }
+
+    return $segments[0];
+}
+
+/**
  * Track the recent navigation trail for logged-in users.
  */
 function trackNavigationHistory() {
@@ -1389,6 +2263,27 @@ function trackNavigationHistory() {
         }
         $_SESSION['nav_history'] = $history;
     }
+
+    $group = getNavigationGroupFromUrl($currentUrl);
+    if ($group !== '') {
+        if (!isset($_SESSION['nav_group_history']) || !is_array($_SESSION['nav_group_history'])) {
+            $_SESSION['nav_group_history'] = [];
+        }
+
+        if (!isset($_SESSION['nav_group_history'][$group]) || !is_array($_SESSION['nav_group_history'][$group])) {
+            $_SESSION['nav_group_history'][$group] = [
+                'current' => '',
+                'previous' => '',
+            ];
+        }
+
+        $groupCurrent = sanitizeNavigationUrl($_SESSION['nav_group_history'][$group]['current'] ?? '');
+        if ($groupCurrent !== '' && normalizeUrlForComparison($groupCurrent) !== $normalizedCurrent) {
+            $_SESSION['nav_group_history'][$group]['previous'] = $groupCurrent;
+        }
+
+        $_SESSION['nav_group_history'][$group]['current'] = $currentUrl;
+    }
 }
 
 /**
@@ -1415,6 +2310,14 @@ function getSmartBackUrl($fallback = '') {
             if (normalizeUrlForComparison($candidate) !== $normalizedCurrent) {
                 return $candidate;
             }
+        }
+    }
+
+    $group = getNavigationGroupFromUrl($currentUrl);
+    if ($group !== '' && !empty($_SESSION['nav_group_history'][$group]['previous'])) {
+        $candidate = sanitizeNavigationUrl($_SESSION['nav_group_history'][$group]['previous']);
+        if ($candidate !== '' && normalizeUrlForComparison($candidate) !== $normalizedCurrent && !isNavigationNoiseUrl($candidate)) {
+            return $candidate;
         }
     }
 
@@ -1643,18 +2546,29 @@ function getStudentFeeSummary($studentId, $asOfDate = null) {
         return $cache[$cacheKey] = $emptySummary;
     }
 
-    $student = fetchOne(
-        "SELECT s.student_id, s.student_name, s.admission_no, s.roll_no, s.gender,
-                s.date_of_birth, s.father_name, s.mother_name, s.contact_no,
-                s.email, s.address, s.photo, s.class_id, s.section_id,
-                c.class_name, sec.section_name
-         FROM students s
-         LEFT JOIN classes c ON s.class_id = c.class_id
-         LEFT JOIN sections sec ON s.section_id = sec.section_id
-         WHERE s.student_id = ?",
-        'i',
-        [$studentId]
-    );
+    if (function_exists('ensureFeeModuleSchema')) {
+        ensureFeeModuleSchema();
+    }
+
+    $studentSchoolId = function_exists('getCurrentSchoolId') ? intval(getCurrentSchoolId()) : 0;
+    $studentQuery = "SELECT s.student_id, s.student_name, s.admission_no, s.roll_no, s.gender,
+                            s.date_of_birth, s.father_name, s.mother_name, s.contact_no,
+                            s.email, s.address, s.photo, s.class_id, s.section_id,
+                            c.class_name, sec.section_name, s.school_id
+                     FROM students s
+                     LEFT JOIN classes c ON s.class_id = c.class_id
+                     LEFT JOIN sections sec ON s.section_id = sec.section_id
+                     WHERE s.student_id = ?";
+    $studentParams = [$studentId];
+    $studentTypes = 'i';
+
+    if ($studentSchoolId > 0) {
+        $studentQuery .= " AND COALESCE(s.school_id, 0) = ?";
+        $studentParams[] = $studentSchoolId;
+        $studentTypes .= 'i';
+    }
+
+    $student = fetchOne($studentQuery, $studentTypes, $studentParams);
 
     if (!$student) {
         return $cache[$cacheKey] = $emptySummary;
@@ -1674,15 +2588,22 @@ function getStudentFeeSummary($studentId, $asOfDate = null) {
     $currentYear = intval(date('Y', $referenceTimestamp));
     $currentMonth = intval(date('n', $referenceTimestamp));
 
-    $feeStructure = fetchAll(
-        "SELECT fs.fee_head_id, fs.amount, fh.fee_head_name, fh.fee_type
-         FROM fee_structure fs
-         JOIN fee_heads fh ON fs.fee_head_id = fh.fee_head_id
-         WHERE fs.student_id = ? AND fs.is_active = 1
-         ORDER BY fh.display_order, fh.fee_head_name",
-        'i',
-        [$studentId]
-    );
+    $feeStructureQuery = "SELECT fs.fee_head_id, fs.amount, fh.fee_head_name, fh.fee_type
+                          FROM fee_structure fs
+                          JOIN fee_heads fh ON fs.fee_head_id = fh.fee_head_id
+                          WHERE fs.student_id = ? AND fs.is_active = 1";
+    $feeStructureParams = [$studentId];
+    $feeStructureTypes = 'i';
+
+    if ($studentSchoolId > 0) {
+        $feeStructureQuery .= " AND COALESCE(fs.school_id, 0) = ? AND COALESCE(fh.school_id, 0) = ?";
+        $feeStructureParams[] = $studentSchoolId;
+        $feeStructureParams[] = $studentSchoolId;
+        $feeStructureTypes .= 'ii';
+    }
+
+    $feeStructureQuery .= " ORDER BY fh.display_order, fh.fee_head_name";
+    $feeStructure = fetchAll($feeStructureQuery, $feeStructureTypes, $feeStructureParams);
 
     $paidRows = fetchAll(
         "SELECT frd.fee_head_id, frd.fee_month, frd.fee_year, SUM(frd.amount) as paid_amount
@@ -1821,6 +2742,12 @@ function getStudentFeeSummary($studentId, $asOfDate = null) {
  * @return array
  */
 function getStudentsWithDueFees($classId = 0, $sectionId = 0, $asOfDate = null) {
+    if (function_exists('ensureFeeModuleSchema')) {
+        ensureFeeModuleSchema();
+    }
+
+    $schoolId = function_exists('getCurrentSchoolId') ? intval(getCurrentSchoolId()) : 0;
+
     $query = "SELECT
                 s.student_id, s.student_name, s.admission_no, s.father_name,
                 s.contact_no, c.class_name, c.class_order, sec.section_name
@@ -1831,6 +2758,12 @@ function getStudentsWithDueFees($classId = 0, $sectionId = 0, $asOfDate = null) 
 
     $params = [];
     $types = '';
+
+    if ($schoolId > 0) {
+        $query .= " AND COALESCE(s.school_id, 0) = ?";
+        $params[] = $schoolId;
+        $types .= 'i';
+    }
 
     if ($classId > 0) {
         $query .= " AND s.class_id = ?";
@@ -1904,6 +2837,48 @@ function buildQrCodeUrl($text, $size = 160) {
 
     $size = max(80, min(300, intval($size)));
     return 'https://api.qrserver.com/v1/create-qr-code/?size=' . $size . 'x' . $size . '&data=' . urlencode($text);
+}
+
+/**
+ * Build a signed token for student attendance QR codes.
+ *
+ * @param array $student
+ * @return string
+ */
+function buildStudentAttendanceToken($student) {
+    $studentId = intval($student['student_id'] ?? 0);
+    if ($studentId <= 0) {
+        return '';
+    }
+
+    $schoolId = intval($student['school_id'] ?? 0);
+    if ($schoolId <= 0 && function_exists('getCurrentSchoolId')) {
+        $schoolId = intval(getCurrentSchoolId());
+    }
+
+    $payload = [
+        'student_id' => $studentId,
+        'school_id' => $schoolId,
+        'admission_no' => trim((string)($student['admission_no'] ?? '')),
+        'issued_at' => date('c'),
+    ];
+
+    return encryptAppValue(json_encode($payload));
+}
+
+/**
+ * Build the teacher scan URL for a student's attendance QR code.
+ *
+ * @param array $student
+ * @return string
+ */
+function buildStudentAttendanceScanUrl($student) {
+    $token = buildStudentAttendanceToken($student);
+    if ($token === '') {
+        return '';
+    }
+
+    return APP_URL . '/modules/attendance/scan.php?token=' . urlencode($token);
 }
 
 /**
@@ -2047,7 +3022,25 @@ function getSessionPendingSummary($asOfDate = null) {
         );
     }
 
-    $activeStudentsRow = fetchOne("SELECT COUNT(*) as total FROM students WHERE status = 'Active'");
+    $schoolId = function_exists('getCurrentSchoolId') ? intval(getCurrentSchoolId()) : 0;
+    if ($schoolId > 0) {
+        $activeStudentsRow = fetchOne(
+            "SELECT COUNT(*) as total
+             FROM students
+             WHERE status = 'Active' AND school_id = ?",
+            'i',
+            [$schoolId]
+        );
+    } else {
+        // Platform-level summaries should ignore legacy/orphan rows that are
+        // not attached to any school and therefore cannot be carried forward.
+        $activeStudentsRow = fetchOne(
+            "SELECT COUNT(*) as total
+             FROM students s
+             INNER JOIN schools sc ON sc.school_id = s.school_id
+             WHERE s.status = 'Active'"
+        );
+    }
     $activeStudentCount = intval($activeStudentsRow['total'] ?? 0);
 
     return [
@@ -2574,12 +3567,24 @@ function cleanupRecycleBin($days = null) {
  * @return bool
  */
 function softDeleteFeeAssignment($structureId, $reason = 'Removed by admin') {
+    $schoolId = function_exists('getCurrentSchoolId') ? intval(getCurrentSchoolId()) : 0;
+
     // Get fee assignment data
-    $assignment = fetchOne("SELECT fs.*, fh.fee_head_name, s.student_name, s.admission_no
-                           FROM fee_structure fs
-                           JOIN fee_heads fh ON fs.fee_head_id = fh.fee_head_id
-                           JOIN students s ON fs.student_id = s.student_id
-                           WHERE fs.structure_id = ?", 'i', [$structureId]);
+    $assignmentQuery = "SELECT fs.*, fh.fee_head_name, s.student_name, s.admission_no
+                        FROM fee_structure fs
+                        JOIN fee_heads fh ON fs.fee_head_id = fh.fee_head_id
+                        JOIN students s ON fs.student_id = s.student_id
+                        WHERE fs.structure_id = ?";
+    $assignmentParams = [$structureId];
+    $assignmentTypes = 'i';
+
+    if ($schoolId > 0) {
+        $assignmentQuery .= " AND COALESCE(fs.school_id, 0) = ?";
+        $assignmentParams[] = $schoolId;
+        $assignmentTypes .= 'i';
+    }
+
+    $assignment = fetchOne($assignmentQuery, $assignmentTypes, $assignmentParams);
 
     if (!$assignment) {
         return false;
@@ -2605,25 +3610,58 @@ function softDeleteFeeAssignment($structureId, $reason = 'Removed by admin') {
  * @return bool
  */
 function softDeleteFeeHead($feeHeadId, $reason = 'Removed by admin') {
+    $schoolId = function_exists('getCurrentSchoolId') ? intval(getCurrentSchoolId()) : 0;
+
     // Get fee head data
-    $feeHead = fetchOne("SELECT * FROM fee_heads WHERE fee_head_id = ?", 'i', [$feeHeadId]);
+    $feeHeadQuery = "SELECT * FROM fee_heads WHERE fee_head_id = ?";
+    $feeHeadParams = [$feeHeadId];
+    $feeHeadTypes = 'i';
+
+    if ($schoolId > 0) {
+        $feeHeadQuery .= " AND COALESCE(school_id, 0) = ?";
+        $feeHeadParams[] = $schoolId;
+        $feeHeadTypes .= 'i';
+    }
+
+    $feeHead = fetchOne($feeHeadQuery, $feeHeadTypes, $feeHeadParams);
 
     if (!$feeHead) {
         return false;
     }
 
     // Check if it's in use (only active assignments)
-    $usageCount = fetchOne("SELECT COUNT(*) as count FROM fee_structure WHERE fee_head_id = ? AND is_active = 1", 'i', [$feeHeadId]);
+    $usageCountQuery = "SELECT COUNT(*) as count FROM fee_structure WHERE fee_head_id = ? AND is_active = 1";
+    $usageCountParams = [$feeHeadId];
+    $usageCountTypes = 'i';
+
+    if ($schoolId > 0) {
+        $usageCountQuery .= " AND COALESCE(school_id, 0) = ?";
+        $usageCountParams[] = $schoolId;
+        $usageCountTypes .= 'i';
+    }
+
+    $usageCount = fetchOne($usageCountQuery, $usageCountTypes, $usageCountParams);
 
     if ($usageCount['count'] > 0) {
         return false; // Cannot delete if actively in use
     }
 
     // Check for any ACTIVE (non-cancelled) receipts using this fee head
-    $receiptCount = fetchOne("SELECT COUNT(*) as count
-                              FROM fee_receipt_details frd
-                              JOIN fee_receipts fr ON frd.receipt_id = fr.receipt_id
-                              WHERE frd.fee_head_id = ? AND fr.is_cancelled = 0", 'i', [$feeHeadId]);
+    $receiptCountQuery = "SELECT COUNT(*) as count
+                          FROM fee_receipt_details frd
+                          JOIN fee_receipts fr ON frd.receipt_id = fr.receipt_id
+                          JOIN students s ON fr.student_id = s.student_id
+                          WHERE frd.fee_head_id = ? AND fr.is_cancelled = 0";
+    $receiptCountParams = [$feeHeadId];
+    $receiptCountTypes = 'i';
+
+    if ($schoolId > 0) {
+        $receiptCountQuery .= " AND COALESCE(s.school_id, 0) = ?";
+        $receiptCountParams[] = $schoolId;
+        $receiptCountTypes .= 'i';
+    }
+
+    $receiptCount = fetchOne($receiptCountQuery, $receiptCountTypes, $receiptCountParams);
 
     if ($receiptCount['count'] > 0) {
         error_log("Cannot delete fee head ID: $feeHeadId - has {$receiptCount['count']} active receipt details");
@@ -2640,7 +3678,17 @@ function softDeleteFeeHead($feeHeadId, $reason = 'Removed by admin') {
 
     try {
         // Delete all inactive fee_structure assignments first (to clear foreign key)
-        $inactiveFees = fetchAll("SELECT * FROM fee_structure WHERE fee_head_id = ? AND is_active = 0", 'i', [$feeHeadId]);
+        $inactiveFeesQuery = "SELECT * FROM fee_structure WHERE fee_head_id = ? AND is_active = 0";
+        $inactiveFeesParams = [$feeHeadId];
+        $inactiveFeesTypes = 'i';
+
+        if ($schoolId > 0) {
+            $inactiveFeesQuery .= " AND COALESCE(school_id, 0) = ?";
+            $inactiveFeesParams[] = $schoolId;
+            $inactiveFeesTypes .= 'i';
+        }
+
+        $inactiveFees = fetchAll($inactiveFeesQuery, $inactiveFeesTypes, $inactiveFeesParams);
 
         foreach ($inactiveFees as $fee) {
             executeQuery("DELETE FROM fee_structure WHERE structure_id = ?", 'i', [$fee['structure_id']]);
@@ -2654,7 +3702,18 @@ function softDeleteFeeHead($feeHeadId, $reason = 'Removed by admin') {
             // Check if this ledger entry has been paid (has receipt)
             if (!empty($ledger['receipt_id'])) {
                 // Check if the receipt is cancelled
-                $receipt = fetchOne("SELECT is_cancelled FROM fee_receipts WHERE receipt_id = ?", 'i', [$ledger['receipt_id']]);
+                $receiptQuery = "SELECT fr.is_cancelled
+                                 FROM fee_receipts fr
+                                 JOIN students s ON fr.student_id = s.student_id
+                                 WHERE fr.receipt_id = ?";
+                $receiptParams = [$ledger['receipt_id']];
+                $receiptTypes = 'i';
+                if ($schoolId > 0) {
+                    $receiptQuery .= " AND COALESCE(s.school_id, 0) = ?";
+                    $receiptParams[] = $schoolId;
+                    $receiptTypes .= 'i';
+                }
+                $receipt = fetchOne($receiptQuery, $receiptTypes, $receiptParams);
                 if ($receipt && $receipt['is_cancelled'] == 0) {
                     error_log("Cannot delete fee head ID: $feeHeadId - has active ledger entry tied to receipt ID: {$ledger['receipt_id']}");
                     return false; // Cannot delete if ledger has active receipt
@@ -2665,16 +3724,36 @@ function softDeleteFeeHead($feeHeadId, $reason = 'Removed by admin') {
         }
 
         // Delete cancelled receipt details for this fee head
-        $cancelledReceiptDetails = fetchAll("SELECT frd.* FROM fee_receipt_details frd
-                                             JOIN fee_receipts fr ON frd.receipt_id = fr.receipt_id
-                                             WHERE frd.fee_head_id = ? AND fr.is_cancelled = 1", 'i', [$feeHeadId]);
+        $cancelledReceiptDetailsQuery = "SELECT frd.* FROM fee_receipt_details frd
+                                         JOIN fee_receipts fr ON frd.receipt_id = fr.receipt_id
+                                         JOIN students s ON fr.student_id = s.student_id
+                                         WHERE frd.fee_head_id = ? AND fr.is_cancelled = 1";
+        $cancelledReceiptDetailsParams = [$feeHeadId];
+        $cancelledReceiptDetailsTypes = 'i';
+
+        if ($schoolId > 0) {
+            $cancelledReceiptDetailsQuery .= " AND COALESCE(s.school_id, 0) = ?";
+            $cancelledReceiptDetailsParams[] = $schoolId;
+            $cancelledReceiptDetailsTypes .= 'i';
+        }
+
+        $cancelledReceiptDetails = fetchAll($cancelledReceiptDetailsQuery, $cancelledReceiptDetailsTypes, $cancelledReceiptDetailsParams);
 
         foreach ($cancelledReceiptDetails as $detail) {
             executeQuery("DELETE FROM fee_receipt_details WHERE detail_id = ?", 'i', [$detail['detail_id']]);
         }
 
         // Now delete from fee_heads table
-        $deleted = executeQuery("DELETE FROM fee_heads WHERE fee_head_id = ?", 'i', [$feeHeadId]);
+        $deleteHeadQuery = "DELETE FROM fee_heads WHERE fee_head_id = ?";
+        $deleteHeadParams = [$feeHeadId];
+        $deleteHeadTypes = 'i';
+        if ($schoolId > 0) {
+            $deleteHeadQuery .= " AND COALESCE(school_id, 0) = ?";
+            $deleteHeadParams[] = $schoolId;
+            $deleteHeadTypes .= 'i';
+        }
+
+        $deleted = executeQuery($deleteHeadQuery, $deleteHeadTypes, $deleteHeadParams);
 
         if ($deleted === false) {
             error_log("Failed to delete fee head ID: $feeHeadId from database after moving to recycle bin");

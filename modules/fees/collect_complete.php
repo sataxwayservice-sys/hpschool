@@ -20,7 +20,7 @@ $success = '';
 // Get school settings
 $schoolSettings = getSchoolSettings();
 $currentBatch = $schoolSettings['current_academic_year'] ?? date('Y') . '-' . (date('Y') + 1);
-$schoolName = $schoolSettings['school_name'] ?? 'My School';
+$schoolName = trim((string)($schoolSettings['school_name'] ?? APP_NAME));
 
 // Get student if ID provided
 $student = null;

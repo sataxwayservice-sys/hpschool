@@ -9,9 +9,13 @@ require_once '../../config/config.php';
 // Require login
 requireLogin();
 
-$pageTitle = 'Dashboard';
 $currentUser = getCurrentUser();
 $currentSchoolId = getCurrentSchoolId();
+$currentRole = strtolower(trim((string)($currentUser['role'] ?? '')));
+$isSuperAdmin = $currentRole === 'super_admin';
+$hasSchoolContext = $currentSchoolId > 0;
+$showSchoolDashboard = !$isSuperAdmin && $hasSchoolContext;
+$pageTitle = $isSuperAdmin ? 'Control Dashboard' : 'Dashboard';
 
 if (($currentUser['role'] ?? '') === 'admin' && function_exists('schoolRegistrationSeedDefaultAdminPermissions')) {
     $permissionCount = fetchOne(
@@ -31,83 +35,124 @@ $activeStudents = 0;
 $totalFeeCollected = 0;
 $outstandingFees = 0;
 $todayCollection = 0;
+$superAdminTotalSchools = 0;
+$superAdminApprovedSchools = 0;
+$superAdminPendingSchools = 0;
+$superAdminPlatformStudents = 0;
+$superAdminPlatformCollection = 0;
 
-// Total students
-$query = "SELECT COUNT(*) as total FROM students WHERE status = 'Active'";
-$result = $currentSchoolId > 0
-    ? fetchOne($query . " AND school_id = ?", 'i', [$currentSchoolId])
-    : fetchOne($query);
-$activeStudents = $result['total'] ?? 0;
+if ($showSchoolDashboard) {
+    // Total students
+    $query = "SELECT COUNT(*) as total FROM students WHERE status = 'Active' AND school_id = ?";
+    $result = fetchOne($query, 'i', [$currentSchoolId]);
+    $activeStudents = $result['total'] ?? 0;
 
-// Total students (including inactive)
-$query = "SELECT COUNT(*) as total FROM students";
-$result = $currentSchoolId > 0
-    ? fetchOne($query . " WHERE school_id = ?", 'i', [$currentSchoolId])
-    : fetchOne($query);
-$totalStudents = $result['total'] ?? 0;
+    // Total students (including inactive)
+    $query = "SELECT COUNT(*) as total FROM students WHERE school_id = ?";
+    $result = fetchOne($query, 'i', [$currentSchoolId]);
+    $totalStudents = $result['total'] ?? 0;
 
-// Today's collection
-$query = "SELECT COALESCE(SUM(fr.amount_paid), 0) as total
-          FROM fee_receipts fr
-          JOIN students s ON fr.student_id = s.student_id
-          WHERE DATE(fr.payment_date) = CURDATE() AND fr.is_cancelled = 0";
-$result = $currentSchoolId > 0
-    ? fetchOne($query . " AND s.school_id = ?", 'i', [$currentSchoolId])
-    : fetchOne($query);
-$todayCollection = $result['total'] ?? 0;
+    // Today's collection
+    $query = "SELECT COALESCE(SUM(fr.amount_paid), 0) as total
+              FROM fee_receipts fr
+              JOIN students s ON fr.student_id = s.student_id
+              WHERE DATE(fr.payment_date) = CURDATE()
+              AND fr.is_cancelled = 0
+              AND s.school_id = ?";
+    $result = fetchOne($query, 'i', [$currentSchoolId]);
+    $todayCollection = $result['total'] ?? 0;
 
-// Total fee collected (this month)
-$query = "SELECT COALESCE(SUM(fr.amount_paid), 0) as total
-          FROM fee_receipts fr
-          JOIN students s ON fr.student_id = s.student_id
-          WHERE MONTH(fr.payment_date) = MONTH(CURDATE())
-          AND YEAR(fr.payment_date) = YEAR(CURDATE())
-          AND fr.is_cancelled = 0";
-$result = $currentSchoolId > 0
-    ? fetchOne($query . " AND s.school_id = ?", 'i', [$currentSchoolId])
-    : fetchOne($query);
-$totalFeeCollected = $result['total'] ?? 0;
+    // Total fee collected (this month)
+    $query = "SELECT COALESCE(SUM(fr.amount_paid), 0) as total
+              FROM fee_receipts fr
+              JOIN students s ON fr.student_id = s.student_id
+              WHERE MONTH(fr.payment_date) = MONTH(CURDATE())
+              AND YEAR(fr.payment_date) = YEAR(CURDATE())
+              AND fr.is_cancelled = 0
+              AND s.school_id = ?";
+    $result = fetchOne($query, 'i', [$currentSchoolId]);
+    $totalFeeCollected = $result['total'] ?? 0;
 
-// Outstanding fees (simplified calculation)
-$query = "SELECT COUNT(DISTINCT student_id) as total FROM students WHERE status = 'Active'";
-$result = $currentSchoolId > 0
-    ? fetchOne($query . " AND school_id = ?", 'i', [$currentSchoolId])
-    : fetchOne($query);
-$studentsWithDues = $result['total'] ?? 0;
+    // Outstanding fees (simplified calculation)
+    $query = "SELECT COUNT(DISTINCT student_id) as total FROM students WHERE status = 'Active' AND school_id = ?";
+    $result = fetchOne($query, 'i', [$currentSchoolId]);
+    $studentsWithDues = $result['total'] ?? 0;
 
-// Recent transactions
-$recentTransactionsQuery = "
-    SELECT fr.*, s.student_name, s.admission_no, c.class_name
-    FROM fee_receipts fr
-    JOIN students s ON fr.student_id = s.student_id
-    JOIN classes c ON s.class_id = c.class_id
-    WHERE fr.is_cancelled = 0";
-if ($currentSchoolId > 0) {
-    $recentTransactionsQuery .= " AND s.school_id = ?";
-    $recentTransactions = fetchAll($recentTransactionsQuery . " ORDER BY fr.created_at DESC LIMIT 10", 'i', [$currentSchoolId]);
+    // Recent transactions
+    $recentTransactionsQuery = "
+        SELECT fr.*, s.student_name, s.admission_no, c.class_name
+        FROM fee_receipts fr
+        JOIN students s ON fr.student_id = s.student_id
+        JOIN classes c ON s.class_id = c.class_id
+        WHERE fr.is_cancelled = 0
+          AND s.school_id = ?
+        ORDER BY fr.created_at DESC
+        LIMIT 10";
+    $recentTransactions = fetchAll($recentTransactionsQuery, 'i', [$currentSchoolId]);
 } else {
-    $recentTransactions = fetchAll($recentTransactionsQuery . " ORDER BY fr.created_at DESC LIMIT 10");
+    $recentTransactions = [];
 }
 
 $pendingSchoolRequests = [];
-if ($currentUser['role'] === 'super_admin' && function_exists('schoolRegistrationGetRequests')) {
+if ($isSuperAdmin && function_exists('schoolRegistrationGetRequests')) {
     $pendingSchoolRequests = schoolRegistrationGetRequests('pending', 5);
+    $pendingSchoolCount = fetchOne("SELECT COUNT(*) as total FROM schools WHERE status = 'pending'");
+    $approvedSchoolCount = fetchOne("SELECT COUNT(*) as total FROM schools WHERE status = 'approved'");
+    $schoolCount = fetchOne("SELECT COUNT(*) as total FROM schools");
+    // Count only students attached to a real school. Legacy/imported rows without
+    // a school_id are not available anywhere in the multi-school platform.
+    $studentCount = fetchOne(
+        "SELECT COUNT(*) as total
+         FROM students s
+         INNER JOIN schools sc ON sc.school_id = s.school_id"
+    );
+    $platformCollection = fetchOne(
+        "SELECT COALESCE(SUM(fr.amount_paid), 0) as total
+         FROM fee_receipts fr
+         JOIN students s ON fr.student_id = s.student_id
+         INNER JOIN schools sc ON sc.school_id = s.school_id
+         WHERE MONTH(fr.payment_date) = MONTH(CURDATE())
+           AND YEAR(fr.payment_date) = YEAR(CURDATE())
+           AND fr.is_cancelled = 0"
+    );
+
+    $superAdminPendingSchools = intval($pendingSchoolCount['total'] ?? 0);
+    $superAdminApprovedSchools = intval($approvedSchoolCount['total'] ?? 0);
+    $superAdminTotalSchools = intval($schoolCount['total'] ?? 0);
+    $superAdminPlatformStudents = intval($studentCount['total'] ?? 0);
+    $superAdminPlatformCollection = floatval($platformCollection['total'] ?? 0);
 }
 
 // Due students (students with no payments this month)
-$dueStudentsQuery = "
-    SELECT s.student_id, s.admission_no, s.student_name, s.contact_no, c.class_name, sec.section_name
-    FROM students s
-    JOIN classes c ON s.class_id = c.class_id
-    JOIN sections sec ON s.section_id = sec.section_id
-    LEFT JOIN fee_receipts fr ON s.student_id = fr.student_id
-        AND MONTH(fr.payment_date) = MONTH(CURDATE())
-        AND YEAR(fr.payment_date) = YEAR(CURDATE())
-    WHERE s.status = 'Active' AND fr.receipt_id IS NULL";
-if ($currentSchoolId > 0) {
-    $dueStudents = fetchAll($dueStudentsQuery . " AND s.school_id = ? LIMIT 10", 'i', [$currentSchoolId]);
-} else {
-    $dueStudents = fetchAll($dueStudentsQuery . " LIMIT 10");
+$dueStudents = [];
+if ($showSchoolDashboard) {
+    $dueStudentsQuery = "
+        SELECT s.student_id, s.admission_no, s.student_name, s.contact_no, c.class_name, sec.section_name
+        FROM students s
+        JOIN classes c ON s.class_id = c.class_id
+        JOIN sections sec ON s.section_id = sec.section_id
+        LEFT JOIN fee_receipts fr ON s.student_id = fr.student_id
+            AND MONTH(fr.payment_date) = MONTH(CURDATE())
+            AND YEAR(fr.payment_date) = YEAR(CURDATE())
+        WHERE s.status = 'Active' AND fr.receipt_id IS NULL
+          AND s.school_id = ?
+        LIMIT 10";
+    $dueStudents = fetchAll($dueStudentsQuery, 'i', [$currentSchoolId]);
+}
+
+$subscriptionDetails = [];
+$subscriptionPlanLabel = 'Free';
+$subscriptionStatusLabel = 'Active';
+$subscriptionPriceLabel = formatCurrency(0);
+$subscriptionPaymentLink = '';
+$subscriptionHasAction = false;
+if ($showSchoolDashboard && function_exists('getSchoolSubscriptionDetails')) {
+    $subscriptionDetails = getSchoolSubscriptionDetails($currentSchoolId);
+    $subscriptionPlanLabel = ucfirst(trim((string)($subscriptionDetails['subscription_plan'] ?? 'free')));
+    $subscriptionStatusLabel = ucfirst(trim((string)($subscriptionDetails['subscription_status'] ?? 'active')));
+    $subscriptionPriceLabel = formatCurrency(floatval($subscriptionDetails['subscription_price'] ?? 0));
+    $subscriptionPaymentLink = trim((string)($subscriptionDetails['subscription_payment_link'] ?? ''));
+    $subscriptionHasAction = true;
 }
 
 $adminPortalTiles = [];
@@ -116,8 +161,8 @@ if (($currentUser['role'] ?? '') === 'admin') {
 
 $superAdminControlGroups = [
     [
-        'title' => 'System Setup',
-        'description' => 'Core school branding, security, and structure tools.',
+        'title' => 'Access & Security',
+        'description' => 'Platform identity, users, and permissions.',
         'items' => [
             [
                 'title' => 'User Management',
@@ -128,17 +173,24 @@ $superAdminControlGroups = [
             ],
             [
                 'title' => 'Permissions',
-                'description' => 'Control module access for each role and school.',
+                'description' => 'Control feature access for each role and school.',
                 'icon' => 'bi-shield-lock',
                 'variant' => 'warning',
                 'href' => APP_URL . '/modules/settings/manage_permissions.php'
             ],
             [
-                'title' => 'School Role Control',
+                'title' => 'School Access Rules',
                 'description' => 'Choose which staff roles are available for each school.',
                 'icon' => 'bi-person-gear',
                 'variant' => 'info',
                 'href' => APP_URL . '/modules/settings/school_role_control.php'
+            ],
+            [
+                'title' => 'Student Add Limit',
+                'description' => 'Increase or decrease the admission quota for a selected school.',
+                'icon' => 'bi-sliders2',
+                'variant' => 'dark',
+                'href' => APP_URL . '/modules/settings/manage_permissions.php?role=admin#student-add-limit'
             ],
             [
                 'title' => 'Recycle Bin',
@@ -150,111 +202,29 @@ $superAdminControlGroups = [
         ],
     ],
     [
-        'title' => 'Academic & Student',
-        'description' => 'Student structure, admissions, and portal access.',
+        'title' => 'Plans & Branding',
+        'description' => 'Subscription pricing, ads, and school identity controls.',
         'items' => [
             [
-                'title' => 'Classes',
-                'description' => 'Create and maintain class groups.',
-                'icon' => 'bi-diagram-3',
+                'title' => 'Subscriptions',
+                'description' => 'Set free or premium pricing for each school.',
+                'icon' => 'bi-credit-card-2-front',
                 'variant' => 'primary',
-                'href' => APP_URL . '/modules/settings/classes.php'
+                'href' => APP_URL . '/modules/settings/subscriptions.php'
             ],
             [
-                'title' => 'Sections',
-                'description' => 'Organize sections for each class.',
-                'icon' => 'bi-grid-3x3-gap',
-                'variant' => 'success',
-                'href' => APP_URL . '/modules/settings/sections.php'
-            ],
-            [
-                'title' => 'Student Applications',
-                'description' => 'Review pending applications and edit submissions.',
-                'icon' => 'bi-person-badge',
+                'title' => 'School Ads',
+                'description' => 'Create school-specific promotions and banner placements.',
+                'icon' => 'bi-megaphone',
                 'variant' => 'warning',
-                'href' => APP_URL . '/modules/settings/student_portal.php#applications'
-            ],
-        ],
-    ],
-    [
-        'title' => 'Finance & Reports',
-        'description' => 'Fee tools, reports, and result records.',
-        'items' => [
-            [
-                'title' => 'Fee Heads',
-                'description' => 'Configure admission, tuition, transport, and other fees.',
-                'icon' => 'bi-cash-stack',
-                'variant' => 'success',
-                'href' => APP_URL . '/modules/settings/fee_heads.php'
+                'href' => APP_URL . '/modules/settings/school_ads.php'
             ],
             [
-                'title' => 'Receipt Books',
-                'description' => 'Manage receipt books and numbering setup.',
-                'icon' => 'bi-book',
-                'variant' => 'dark',
-                'href' => APP_URL . '/modules/settings/receipt_books.php'
-            ],
-            [
-                'title' => 'Fees Collection',
-                'description' => 'Open the fee collection workspace.',
-                'icon' => 'bi-cash-coin',
-                'variant' => 'primary',
-                'href' => APP_URL . '/modules/fees/collect.php'
-            ],
-            [
-                'title' => 'Due Fees',
-                'description' => 'Check pending fee reports and follow-ups.',
-                'icon' => 'bi-exclamation-triangle',
-                'variant' => 'danger',
-                'href' => APP_URL . '/modules/fees/due.php'
-            ],
-            [
-                'title' => 'Reports Hub',
-                'description' => 'Open student, fee, marks, and system reports.',
-                'icon' => 'bi-graph-up-arrow',
+                'title' => 'Login Page Text',
+                'description' => 'Edit staff login branding, hero copy, and labels.',
+                'icon' => 'bi-box-arrow-in-right',
                 'variant' => 'info',
-                'href' => APP_URL . '/modules/reports/'
-            ],
-            [
-                'title' => 'Marks & Exams',
-                'description' => 'Enter marks and manage exam records.',
-                'icon' => 'bi-journal-check',
-                'variant' => 'warning',
-                'href' => APP_URL . '/modules/marks/index.php'
-            ],
-        ],
-    ],
-    [
-        'title' => 'Documents & Communication',
-        'description' => 'Generated documents, notices, and message tools.',
-        'items' => [
-            [
-                'title' => 'Admit Cards',
-                'description' => 'Generate student-wise and class-wise admit cards.',
-                'icon' => 'bi-card-heading',
-                'variant' => 'primary',
-                'href' => APP_URL . '/modules/reports/admit_cards.php'
-            ],
-            [
-                'title' => 'Certificates',
-                'description' => 'Create transfer and character certificates.',
-                'icon' => 'bi-award',
-                'variant' => 'success',
-                'href' => APP_URL . '/modules/reports/student_documents.php'
-            ],
-            [
-                'title' => 'SMS Center',
-                'description' => 'Send reminders and manage SMS templates.',
-                'icon' => 'bi-chat-dots',
-                'variant' => 'info',
-                'href' => APP_URL . '/modules/sms/index.php'
-            ],
-            [
-                'title' => 'School Requests',
-                'description' => 'Approve or reject new school registrations.',
-                'icon' => 'bi-building-check',
-                'variant' => 'warning',
-                'href' => APP_URL . '/modules/settings/school_requests.php'
+                'href' => APP_URL . '/modules/settings/school.php#login-page-text'
             ],
         ],
     ],
@@ -264,26 +234,84 @@ $superAdminControlGroups = [
 include '../../includes/header.php';
 ?>
 
+<?php
+$dashboardAds = [];
+if ($showSchoolDashboard && function_exists('isSchoolAdsEnabled') && isSchoolAdsEnabled($currentSchoolId) && function_exists('getSchoolAdsForPlacement')) {
+    $dashboardAds = getSchoolAdsForPlacement($currentSchoolId, 'dashboard_top', 1);
+}
+?>
+
+<?php if (!empty($dashboardAds)): ?>
+    <div class="row mb-4">
+        <div class="col-12">
+            <?php foreach ($dashboardAds as $ad): ?>
+                <?php
+                $adTitle = trim((string)($ad['title'] ?? ''));
+                $adType = strtolower(trim((string)($ad['ad_type'] ?? 'image')));
+                $adLink = trim((string)($ad['link_url'] ?? ''));
+                $adImage = trim((string)($ad['image_file'] ?? ''));
+                $adText = trim((string)($ad['content_text'] ?? ''));
+                $adHtml = trim((string)($ad['content_html'] ?? ''));
+                $adPreview = '';
+
+                if ($adType === 'image' && $adImage !== '' && function_exists('getSchoolAdImageSrc')) {
+                    $imgSrc = getSchoolAdImageSrc($adImage);
+                    if ($imgSrc !== '') {
+                        $imageTag = '<img src="' . htmlspecialchars($imgSrc) . '" alt="' . htmlspecialchars($adTitle) . '" class="img-fluid rounded" style="max-height:140px;object-fit:cover;">';
+                        $adPreview = $adLink !== ''
+                            ? '<a href="' . htmlspecialchars($adLink) . '" target="_blank" rel="noopener">' . $imageTag . '</a>'
+                            : $imageTag;
+                    }
+                } elseif ($adType === 'html' && $adHtml !== '') {
+                    $adPreview = strip_tags($adHtml, '<a><div><span><p><strong><em><br><ul><ol><li>');
+                } else {
+                    $adPreview = '<div class="fw-semibold">' . htmlspecialchars($adTitle !== '' ? $adTitle : 'Sponsored Notice') . '</div>';
+                    if ($adText !== '') {
+                        $adPreview .= '<div class="small text-muted mt-1">' . nl2br(htmlspecialchars($adText)) . '</div>';
+                    }
+                    if ($adLink !== '') {
+                        $adPreview .= '<div class="mt-2"><a class="btn btn-sm btn-outline-primary" href="' . htmlspecialchars($adLink) . '" target="_blank" rel="noopener">Open Offer</a></div>';
+                    }
+                }
+                ?>
+                <div class="alert alert-light border shadow-sm">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                        <div class="flex-grow-1">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <span class="badge bg-warning text-dark">School Ad</span>
+                                <span class="badge bg-secondary">Dashboard Top</span>
+                            </div>
+                            <?php echo $adPreview; ?>
+                        </div>
+                        <div class="text-muted small">Priority: <?php echo intval($ad['priority'] ?? 0); ?></div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+<?php endif; ?>
+
 <!-- Dashboard Content -->
 <div class="row">
     <div class="col-12">
         <h2 class="mb-4">
-            <i class="bi bi-speedometer2"></i> Dashboard
+            <i class="bi bi-speedometer2"></i> <?php echo $isSuperAdmin ? 'Control Dashboard' : 'Dashboard'; ?>
         </h2>
         <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
             <p class="text-muted mb-0">
                 Welcome back, <strong><?php echo htmlspecialchars($currentUser['full_name']); ?></strong>!
                 <span class="badge bg-primary"><?php echo ucfirst($currentUser['role']); ?></span>
             </p>
-            <?php if ($currentUser['role'] === 'super_admin'): ?>
+            <?php if ($isSuperAdmin): ?>
                 <a href="#super-admin-control-panel" class="btn btn-outline-dark btn-sm">
-                    <i class="bi bi-sliders"></i> Super Admin Portal
+                    <i class="bi bi-sliders"></i> School Dashboard Control Panel
                 </a>
             <?php endif; ?>
         </div>
     </div>
 </div>
 
+<?php if ($showSchoolDashboard): ?>
 <!-- Statistics Cards -->
 <div class="row mt-4">
     <div class="col-md-3 mb-4">
@@ -353,7 +381,6 @@ include '../../includes/header.php';
             </div>
         </div>
     </div>
-
 </div>
 
 <!-- Quick Actions -->
@@ -396,29 +423,134 @@ include '../../includes/header.php';
                         </a>
                     </div>
                     <?php endif; ?>
-
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<?php if ($currentUser['role'] === 'super_admin'): ?>
+<?php if ($showSchoolDashboard): ?>
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card dashboard-card border-0 shadow-sm">
+            <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+                <div>
+                    <div class="badge bg-primary mb-2">Subscription</div>
+                    <h5 class="mb-1"><?php echo htmlspecialchars($subscriptionPlanLabel); ?> Plan</h5>
+                    <p class="text-muted mb-0">
+                        Status: <strong><?php echo htmlspecialchars($subscriptionStatusLabel); ?></strong>
+                        &nbsp;|&nbsp; Price: <strong><?php echo htmlspecialchars($subscriptionPriceLabel); ?></strong>
+                    </p>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <?php if ($subscriptionHasAction): ?>
+                        <a href="<?php echo APP_URL; ?>/modules/settings/subscription_upgrade.php" class="btn btn-success">
+                            <i class="bi bi-credit-card-2-front"></i> Choose Plan & Pay
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+<?php elseif ($isSuperAdmin): ?>
+<!-- Super Admin Platform Stats -->
+<div class="row mt-4">
+    <div class="col-md-3 mb-4">
+        <div class="card dashboard-card stat-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-white-50 mb-2">Total Schools</h6>
+                        <h2 class="mb-0"><?php echo $superAdminTotalSchools; ?></h2>
+                        <small class="text-white-50"><?php echo $superAdminApprovedSchools; ?> approved</small>
+                    </div>
+                    <div class="card-icon">
+                        <i class="bi bi-building text-white"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3 mb-4">
+        <div class="card dashboard-card stat-card-success">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-white-50 mb-2">Platform Students</h6>
+                        <h2 class="mb-0"><?php echo $superAdminPlatformStudents; ?></h2>
+                        <small class="text-white-50">Across all schools</small>
+                    </div>
+                    <div class="card-icon">
+                        <i class="bi bi-people-fill text-white"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3 mb-4">
+        <div class="card dashboard-card stat-card-warning">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-white-50 mb-2">Pending Requests</h6>
+                        <h2 class="mb-0"><?php echo $superAdminPendingSchools; ?></h2>
+                        <small class="text-white-50">Waiting for approval</small>
+                    </div>
+                    <div class="card-icon">
+                        <i class="bi bi-hourglass-split text-white"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3 mb-4">
+        <div class="card dashboard-card stat-card-info">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-white-50 mb-2">Platform Collection</h6>
+                        <h2 class="mb-0"><?php echo formatCurrency($superAdminPlatformCollection); ?></h2>
+                        <small class="text-white-50">This month across schools</small>
+                    </div>
+                    <div class="card-icon">
+                        <i class="bi bi-currency-rupee text-white"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-info mt-2">
+    Super Admin sees platform-wide data only. School-level records stay inside each school admin portal.
+</div>
+<?php else: ?>
+<div class="alert alert-warning mt-4">
+    This account is not linked to a school yet, so school data is hidden until the school connection is fixed.
+</div>
+<?php endif; ?>
+
+<?php if ($isSuperAdmin): ?>
 <div class="row mt-4" id="super-admin-control-panel">
     <div class="col-12">
         <div class="card dashboard-card">
             <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
                     <h5 class="mb-0">
-                        <i class="bi bi-sliders"></i> Super Admin Control Panel
+                        <i class="bi bi-sliders"></i> School Dashboard Control Panel
                     </h5>
-                    <small class="text-white-50">All school-wide control boxes in one place.</small>
+                    <small class="text-white-50">All platform control boxes in one place.</small>
                 </div>
                 <span class="badge bg-light text-dark">Super Admin only</span>
             </div>
             <div class="card-body">
                 <div class="alert alert-primary mb-4">
-                    Use these boxes to manage setup, approvals, academics, fees, documents, reports, and communication without leaving the portal.
+                    Use these boxes to manage platform setup, approvals, plans, and global controls without leaving the portal.
                 </div>
 
                 <?php foreach ($superAdminControlGroups as $group): ?>
@@ -489,7 +621,7 @@ include '../../includes/header.php';
 </div>
 <?php endif; ?>
 
-<?php if ($currentUser['role'] === 'super_admin'): ?>
+<?php if ($isSuperAdmin): ?>
 <div class="row mt-4">
     <div class="col-12">
         <div class="card dashboard-card">
@@ -575,6 +707,7 @@ include '../../includes/header.php';
 <?php endif; ?>
 
 <!-- Recent Activity -->
+<?php if ($showSchoolDashboard): ?>
 <div class="row mt-4">
     <!-- Recent Transactions -->
     <div class="col-md-6">
@@ -682,6 +815,7 @@ include '../../includes/header.php';
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <?php
 // Include footer

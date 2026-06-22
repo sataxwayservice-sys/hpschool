@@ -39,11 +39,17 @@ $selectedRole = isset($_GET['role']) ? sanitize($_GET['role']) : 'admin';
 if (!in_array($selectedRole, ['admin', 'accountant', 'clerk', 'teacher'], true)) {
     $selectedRole = 'admin';
 }
+$allowedRoles = ['admin', 'accountant', 'clerk', 'teacher'];
 
 $selectedSchool = $selectedSchoolId > 0 ? schoolRegistrationGetSchoolById($selectedSchoolId) : null;
 $selectedSchoolLabel = $selectedSchool
     ? (($selectedSchool['school_name'] ?? '-') . ' (' . ($selectedSchool['school_code'] ?? '-') . ')')
     : 'Global Default';
+$selectedStudentAddLimit = getSchoolStudentAddLimit($selectedSchoolId);
+$selectedActiveStudentCount = getSchoolActiveStudentCount($selectedSchoolId);
+$selectedRemainingStudentSeats = $selectedStudentAddLimit > 0
+    ? max(0, $selectedStudentAddLimit - $selectedActiveStudentCount)
+    : 0;
 
 // Define all available permissions grouped by module
 $allPermissions = [
@@ -78,6 +84,9 @@ $allPermissions = [
         ['key' => 'reports_view', 'label' => 'View Reports'],
         ['key' => 'reports_export', 'label' => 'Export Reports']
     ],
+    'Attendance' => [
+        ['key' => 'attendance_scan_view', 'label' => 'Access Attendance Scan']
+    ],
     'School Setup' => [
         ['key' => 'school_settings_view', 'label' => 'School Settings'],
         ['key' => 'academic_years_view', 'label' => 'Academic Years'],
@@ -97,12 +106,39 @@ $allPermissions = [
     ]
 ];
 
+// Handle student add limit update
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_student_add_limit'])) {
+    $schoolId = intval($_POST['school_id'] ?? 0);
+    $studentAddLimit = max(0, intval($_POST['student_add_limit'] ?? 0));
+
+    if ($schoolId <= 0) {
+        $_SESSION['error_message'] = 'Please select a school first.';
+        header("Location: manage_permissions.php?school_id={$selectedSchoolId}&role={$selectedRole}#student-add-limit");
+        exit();
+    }
+
+    $saved = function_exists('setSchoolStudentAddLimit')
+        ? setSchoolStudentAddLimit($schoolId, $studentAddLimit)
+        : false;
+
+    if ($saved) {
+        logActivity($currentUser['user_id'], 'Student Add Limit Updated', 'settings', "Student add limit set to {$studentAddLimit} for school ID #{$schoolId}");
+        $_SESSION['success_message'] = $studentAddLimit > 0
+            ? 'Student add limit updated successfully to ' . number_format($studentAddLimit) . ' for school ID #' . $schoolId . '.'
+            : 'Student add limit updated successfully. Unlimited students are now allowed for school ID #' . $schoolId . '.';
+    } else {
+        $_SESSION['error_message'] = 'Failed to update student add limit. Please try again.';
+    }
+
+    header("Location: manage_permissions.php?school_id={$schoolId}&role={$selectedRole}#student-add-limit");
+    exit();
+}
+
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_permissions'])) {
     $role = sanitize($_POST['role']);
     $schoolId = intval($_POST['school_id'] ?? 0);
     $permissions = isset($_POST['permissions']) ? $_POST['permissions'] : [];
-    $allowedRoles = ['admin', 'accountant', 'clerk', 'teacher'];
     $validPermissionKeys = [];
     foreach ($allPermissions as $permissionGroup) {
         foreach ($permissionGroup as $permissionItem) {
@@ -279,6 +315,88 @@ include '../../includes/header.php';
     </div>
 </div>
 
+<!-- Student Add Limit -->
+<div class="row mb-4" id="student-add-limit">
+    <div class="col-12">
+        <div class="card dashboard-card">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0">
+                    <i class="bi bi-sliders2"></i> Student Add Limit
+                </h5>
+                <span class="badge bg-light text-dark">
+                    <?php echo $selectedStudentAddLimit > 0 ? number_format($selectedStudentAddLimit) . ' Limit' : 'Unlimited'; ?>
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 align-items-stretch mb-3">
+                    <div class="col-lg-4">
+                        <div class="border rounded p-3 h-100 bg-light">
+                            <div class="text-muted small">Selected School</div>
+                            <div class="fw-semibold"><?php echo htmlspecialchars($selectedSchoolLabel); ?></div>
+                            <div class="mt-3 text-muted small">Active Students</div>
+                            <div class="fs-4 fw-bold"><?php echo number_format($selectedActiveStudentCount); ?></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="border rounded p-3 h-100 bg-light">
+                            <div class="text-muted small">Current Limit</div>
+                            <div class="fs-4 fw-bold">
+                                <?php echo $selectedStudentAddLimit > 0 ? number_format($selectedStudentAddLimit) : 'Unlimited'; ?>
+                            </div>
+                            <div class="mt-3 text-muted small">Remaining Seats</div>
+                            <div class="fw-semibold">
+                                <?php echo $selectedStudentAddLimit > 0 ? number_format($selectedRemainingStudentSeats) : 'No limit'; ?>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="border rounded p-3 h-100 bg-light">
+                            <div class="text-muted small">Rule</div>
+                            <div class="fw-semibold">0 means unlimited student admissions for this school.</div>
+                            <div class="mt-3 text-muted small">Status</div>
+                            <div class="badge <?php echo $selectedStudentAddLimit > 0 ? ($selectedRemainingStudentSeats <= 0 ? 'bg-danger' : 'bg-success') : 'bg-secondary'; ?>">
+                                <?php echo $selectedStudentAddLimit > 0 ? ($selectedRemainingStudentSeats <= 0 ? 'Limit Reached' : 'Seats Available') : 'Unlimited'; ?>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <form method="POST" action="" class="row g-3 align-items-end">
+                    <input type="hidden" name="school_id" value="<?php echo intval($selectedSchoolId); ?>">
+                    <input type="hidden" name="role" value="<?php echo htmlspecialchars($selectedRole); ?>">
+                    <input type="hidden" name="save_student_add_limit" value="1">
+
+                    <div class="col-md-8 col-lg-6">
+                        <label for="student_add_limit" class="form-label">Student Add Limit</label>
+                        <div class="input-group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="adjustStudentLimit(-1)" aria-label="Decrease limit">
+                                <i class="bi bi-dash-lg"></i>
+                            </button>
+                            <input type="number"
+                                   min="0"
+                                   step="1"
+                                   class="form-control"
+                                   id="student_add_limit"
+                                   name="student_add_limit"
+                                   value="<?php echo intval($selectedStudentAddLimit); ?>">
+                            <button type="button" class="btn btn-outline-secondary" onclick="adjustStudentLimit(1)" aria-label="Increase limit">
+                                <i class="bi bi-plus-lg"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">Set to 0 for unlimited student admissions.</div>
+                    </div>
+
+                    <div class="col-md-4 col-lg-3">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-save"></i> Save Limit
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Permissions Form -->
 <div class="row">
     <div class="col-12">
@@ -345,6 +463,17 @@ function checkAll() {
 
 function uncheckAll() {
     $('input[type=\"checkbox\"]').prop('checked', false);
+}
+
+function adjustStudentLimit(delta) {
+    const input = document.getElementById('student_add_limit');
+    if (!input) {
+        return;
+    }
+
+    const current = parseInt(input.value || '0', 10);
+    const next = Math.max(0, current + delta);
+    input.value = next;
 }
 ";
 

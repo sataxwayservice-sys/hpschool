@@ -3341,12 +3341,14 @@ function docWrapPrintablePage($title, $schoolName, $contentHtml, $backUrl, $refr
     return ob_get_clean();
 }
 
-function docRenderAdmitCardContent($schoolSettings, $student, $exam, $issueDate = '') {
+function docRenderAdmitCardContent($schoolSettings, $student, $exam, $issueDate = '', array $documentPayload = []) {
     $scheduleRows = docGetAdmitCardScheduleRows($student, $exam, $issueDate);
 
     return admitCardRenderSheetFragment($schoolSettings, $student, $exam, $scheduleRows, [
         'issue_date' => $issueDate,
         'admit_no' => trim((string)($student['admission_no'] ?? '')) . '-' . intval($exam['exam_id'] ?? 0),
+        'show_pending_balance' => !empty($documentPayload['show_pending_balance']) ? 1 : 0,
+        'pending_balance_label' => trim((string)($documentPayload['pending_balance_label'] ?? '')),
     ]);
 }
 
@@ -4084,10 +4086,11 @@ function docRenderFormPage($documentType, $schoolSettings, $student, $exam, $exa
 
     <?php if (intval($student['student_id'] ?? 0) > 0 && !$isBulkCertificateMode): ?>
         <div class="alert alert-info">
-            <strong>Selected student:</strong>
-            <?php echo docEscape($student['student_name'] ?? '-'); ?> |
-            Adm No: <?php echo docEscape($student['admission_no'] ?? '-'); ?> |
-            Class: <?php echo docEscape(trim((($student['class_name'] ?? '-') . ' ' . ($student['section_name'] ?? '')))); ?>
+            <strong><?php echo docEscape($student['student_name'] ?? '-'); ?></strong><br>
+            <span class="small">
+                Adm No: <?php echo docEscape($student['admission_no'] ?? '-'); ?> |
+                Class: <?php echo docEscape(trim((($student['class_name'] ?? '-') . ' ' . ($student['section_name'] ?? '')))); ?>
+            </span>
         </div>
     <?php endif; ?>
 
@@ -4175,8 +4178,36 @@ function docRenderFormPage($documentType, $schoolSettings, $student, $exam, $exa
 
                         <div class="col-lg-4 col-md-6">
                             <label class="form-label">Issue Date</label>
-                            <input type="date" class="form-control" name="issue_date" value="<?php echo docEscape($issueDate); ?>">
+                            <input type="date" class="form-control" name="issue_date" id="issue_date" value="<?php echo docEscape($issueDate); ?>">
                         </div>
+
+                        <?php if ($documentType === 'admit_card'): ?>
+                            <?php
+                            $pendingBalanceAmountLabel = '';
+                            if (!empty($student['student_id']) && function_exists('getStudentFeeSummary')) {
+                                $pendingBalanceSummary = getStudentFeeSummary(intval($student['student_id']), $issueDate);
+                                $pendingBalanceDue = floatval($pendingBalanceSummary['due_total'] ?? 0);
+                                if ($pendingBalanceDue > 0) {
+                                    $pendingBalanceAmountLabel = function_exists('formatCurrency')
+                                        ? formatCurrency($pendingBalanceDue)
+                                        : 'Rs. ' . number_format($pendingBalanceDue, 2);
+                                }
+                            }
+                            ?>
+                            <div class="col-lg-4 col-md-6">
+                                <div class="form-check mt-4">
+                                    <input class="form-check-input" type="checkbox" value="1" id="show_pending_balance" name="show_pending_balance" <?php echo $showPendingBalance ? 'checked' : ''; ?>>
+                                    <label class="form-check-label" for="show_pending_balance">
+                                        Show Pending Balance
+                                        <span
+                                            id="pending_balance_amount_label"
+                                            class="text-danger fw-semibold ms-1<?php echo $pendingBalanceAmountLabel !== '' ? '' : ' d-none'; ?>"
+                                        ><?php echo $pendingBalanceAmountLabel !== '' ? '(' . docEscape($pendingBalanceAmountLabel) . ')' : ''; ?></span>
+                                    </label>
+                                    <small class="text-muted d-block ms-4">Shows the pending balance amount beside the student name when dues exist.</small>
+                                </div>
+                            </div>
+                        <?php endif; ?>
 
                         <?php if ($supportsBulkCertificate): ?>
                             <div class="col-lg-4 col-md-6">
@@ -4264,6 +4295,7 @@ if (!$supportsBulkCertificate) {
 }
 
 $publishToStudent = intval($_GET['publish_to_student'] ?? 0) === 1;
+$showPendingBalance = intval($_GET['show_pending_balance'] ?? 0) === 1;
 $issueDate = docNormalizeDate($_GET['issue_date'] ?? '', date('Y-m-d'));
 $remarks = trim((string) ($_GET['remarks'] ?? ''));
 $certificateNo = docNormalizeCertificateNumber($_GET['certificate_no'] ?? ($_GET['reference_no'] ?? ''));
@@ -4283,6 +4315,7 @@ if ($documentType === 'transfer_certificate') {
 } elseif ($documentType === 'character_certificate') {
     $paperSize = 'A4';
 }
+$paperOrientation = ($documentType === 'admit_card' && $paperSize === 'A5') ? 'landscape' : 'portrait';
 
 $documentRecord = $recordId > 0 ? studentPortalGetDocument($recordId) : null;
 
@@ -4393,6 +4426,10 @@ if ($documentRecord) {
         $theme = docThemeConfig($documentType);
     }
 
+    if ($documentType === 'admit_card') {
+        $showPendingBalance = !empty($documentPayload['show_pending_balance']);
+    }
+
     $payloadSchool = is_array($documentPayload['school'] ?? null) ? $documentPayload['school'] : [];
     if (!empty($payloadSchool)) {
         $schoolSettings = array_merge($schoolSettings, $payloadSchool);
@@ -4496,6 +4533,8 @@ if ($documentRecord) {
                 'options' => [
                     'issue_date' => $issueDate,
                     'admit_no' => trim((string)($student['admission_no'] ?? '')) . '-' . intval($exam['exam_id'] ?? 0),
+                    'show_pending_balance' => !empty($documentPayload['show_pending_balance']) ? 1 : 0,
+                    'pending_balance_label' => trim((string)($documentPayload['pending_balance_label'] ?? '')),
                 ],
             ],
         ], [
@@ -4511,7 +4550,10 @@ if ($documentRecord) {
 
         if ($requestDownloadPdf) {
             $downloadName = admitCardBuildDownloadName($student, $exam, 'record');
-            $pdfResult = pdfExportDownloadHtml($admitCardHtml, $downloadName);
+            $pdfResult = pdfExportDownloadHtml($admitCardHtml, $downloadName, [
+                'paper_size' => $paperSize,
+                'paper_orientation' => $paperOrientation,
+            ]);
             if (!empty($pdfResult['success'])) {
                 exit();
             }
@@ -4582,6 +4624,7 @@ if ($documentRecord) {
         'remarks' => $remarks !== '' ? $remarks : null,
         'student_search' => $studentSearch !== '' ? $studentSearch : null,
         'paper_size' => $paperSize,
+        'show_pending_balance' => $documentType === 'admit_card' ? ($showPendingBalance ? 1 : null) : null,
         'character_grade' => $documentType === 'character_certificate' ? $characterGrade : null,
         'certificate_no' => in_array($documentType, ['transfer_certificate', 'character_certificate'], true) && $certificateNo !== '' ? $certificateNo : null,
         'reference_no' => $documentType === 'character_certificate' && $referenceNo !== '' ? $referenceNo : null,
@@ -4606,7 +4649,10 @@ if ($documentRecord) {
 
     if ($requestDownloadPdf) {
         $downloadName = docBuildDownloadName($documentType, $student ?: [], 'record');
-        $pdfResult = pdfExportDownloadHtml($printableHtml, $downloadName);
+        $pdfResult = pdfExportDownloadHtml($printableHtml, $downloadName, [
+            'paper_size' => $paperSize,
+            'paper_orientation' => $paperOrientation,
+        ]);
         if (!empty($pdfResult['success'])) {
             exit();
         }
@@ -4626,7 +4672,10 @@ $contentHtml = '';
 if ($documentType === 'admit_card' && $student && $exam) {
     $canGenerate = true;
     $printTitle = 'Admit Card - ' . ($student['student_name'] ?? '');
-    $contentHtml = docRenderAdmitCardContent($schoolSettings, $student, $exam, $issueDate);
+    $contentHtml = docRenderAdmitCardContent($schoolSettings, $student, $exam, $issueDate, [
+        'show_pending_balance' => $showPendingBalance ? 1 : 0,
+        'pending_balance_label' => $showPendingBalance ? admitCardBuildPendingBalanceNote($student, ['show_pending_balance' => true, 'issue_date' => $issueDate]) : '',
+    ]);
 } elseif ($supportsBulkCertificate && $mode === 'bulk' && $classId > 0) {
     $canGenerate = true;
     $printTitle = docTypeLabel($documentType) . 's - ' . $bulkSummaryLabel;
@@ -4744,7 +4793,10 @@ if ($canGenerate) {
             $downloadName = docBuildDownloadName($documentType, [
                 'student_name' => $bulkSummaryLabel,
             ], 'bulk');
-            $pdfResult = pdfExportDownloadHtml($printableHtml, $downloadName);
+            $pdfResult = pdfExportDownloadHtml($printableHtml, $downloadName, [
+                'paper_size' => $paperSize,
+                'paper_orientation' => 'portrait',
+            ]);
             if (!empty($pdfResult['success'])) {
                 exit();
             }
@@ -4767,6 +4819,8 @@ if ($canGenerate) {
     if ($documentType === 'admit_card') {
         $admitCardScheduleRows = docGetAdmitCardScheduleRows($student, $exam, $issueDate);
         $payload['schedule_rows'] = $admitCardScheduleRows;
+        $payload['show_pending_balance'] = $showPendingBalance ? 1 : 0;
+        $payload['pending_balance_label'] = $showPendingBalance ? admitCardBuildPendingBalanceNote($student, ['show_pending_balance' => true, 'issue_date' => $issueDate]) : '';
     }
     if ($documentType === 'character_certificate') {
         $payload['character_grade'] = $characterGrade;
@@ -4813,6 +4867,8 @@ if ($canGenerate) {
                 'options' => [
                     'issue_date' => $issueDate,
                     'admit_no' => trim((string)($student['admission_no'] ?? '')) . '-' . intval($exam['exam_id'] ?? 0),
+                    'show_pending_balance' => $showPendingBalance ? 1 : 0,
+                    'pending_balance_label' => $showPendingBalance ? admitCardBuildPendingBalanceNote($student, ['show_pending_balance' => true, 'issue_date' => $issueDate]) : '',
                 ],
             ],
         ], [
@@ -4841,6 +4897,7 @@ if ($canGenerate) {
         'class_id' => $supportsBulkCertificate && $mode === 'bulk' && $classId > 0 ? $classId : null,
         'section_id' => $supportsBulkCertificate && $mode === 'bulk' && $sectionId > 0 ? $sectionId : null,
         'publish_to_student' => $supportsBulkCertificate ? ($publishToStudent ? 1 : null) : null,
+        'show_pending_balance' => $documentType === 'admit_card' ? ($showPendingBalance ? 1 : null) : null,
         'character_grade' => $documentType === 'character_certificate' ? $characterGrade : null,
         'certificate_no' => in_array($documentType, ['transfer_certificate', 'character_certificate'], true) && $certificateNo !== '' ? $certificateNo : null,
         'paper_size' => $paperSize,
@@ -4868,7 +4925,10 @@ if ($canGenerate) {
         if ($documentType === 'transfer_certificate') {
             $downloadName = docBuildDownloadName($documentType, $student ?: [], $mode === 'bulk' ? 'bulk' : 'student');
         }
-        $pdfResult = pdfExportDownloadHtml($printableHtml, $downloadName);
+        $pdfResult = pdfExportDownloadHtml($printableHtml, $downloadName, [
+            'paper_size' => $paperSize,
+            'paper_orientation' => 'portrait',
+        ]);
         if (!empty($pdfResult['success'])) {
             exit();
         }

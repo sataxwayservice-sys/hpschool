@@ -803,7 +803,17 @@ if (!function_exists('studentPortalSendCredentialsNotification')) {
         if ($email !== '' && isValidEmail($email)) {
             $subject = $schoolName . ' Student Account Approved';
             $body = "Hello {$studentName},\n\nYour student account has been approved.\n\nLogin: {$username}\nPassword: {$plainPassword}\nPortal: {$loginUrl}\n\nPlease keep these details safe.";
-            $fromEmail = !empty($school['school_email']) && isValidEmail($school['school_email']) ? $school['school_email'] : 'no-reply@localhost';
+            $mailHost = '';
+            if (!empty($_SERVER['HTTP_HOST'])) {
+                $mailHost = preg_replace('/:\d+$/', '', strtolower((string)$_SERVER['HTTP_HOST']));
+            } elseif (!empty($_SERVER['SERVER_NAME'])) {
+                $mailHost = strtolower((string)$_SERVER['SERVER_NAME']);
+            }
+            $mailHost = preg_replace('/^www\./', '', $mailHost);
+            if ($mailHost === '') {
+                $mailHost = 'localhost';
+            }
+            $fromEmail = !empty($school['school_email']) && isValidEmail($school['school_email']) ? $school['school_email'] : 'no-reply@' . $mailHost;
             $headers = [
                 'MIME-Version: 1.0',
                 'Content-type: text/plain; charset=UTF-8',

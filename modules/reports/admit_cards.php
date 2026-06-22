@@ -127,6 +127,7 @@ $issueDate = admitCardNormalizeDateInput($_GET['issue_date'] ?? '', date('Y-m-d'
 $paperSize = admitCardNormalizePaperSize($_GET['paper_size'] ?? 'A5');
 $studentSearch = trim((string)($_GET['student_search'] ?? ''));
 $publishToStudent = intval($_GET['publish_to_student'] ?? 0) === 1;
+$showPendingBalance = intval($_GET['show_pending_balance'] ?? 0) === 1;
 $downloadPdf = strtolower(trim((string)($_GET['download'] ?? ''))) === 'pdf';
 
 $classes = fetchAll("SELECT class_id, class_name, class_order FROM classes WHERE is_active = 1 ORDER BY class_order, class_name");
@@ -282,6 +283,17 @@ $generationTitle = 'Admit Card';
 $generationMessage = '';
 $saveVisibility = $publishToStudent ? 1 : 0;
 $backUrl = APP_URL . '/modules/reports/admit_cards.php?mode=' . urlencode($mode);
+$pendingBalanceAmountLabel = '';
+
+if ($mode === 'student' && !empty($student['student_id']) && function_exists('getStudentFeeSummary')) {
+    $pendingBalanceSummary = getStudentFeeSummary(intval($student['student_id']), $issueDate);
+    $pendingBalanceDue = floatval($pendingBalanceSummary['due_total'] ?? 0);
+    if ($pendingBalanceDue > 0) {
+        $pendingBalanceAmountLabel = function_exists('formatCurrency')
+            ? formatCurrency($pendingBalanceDue)
+            : 'Rs. ' . number_format($pendingBalanceDue, 2);
+    }
+}
 
 if ($mode === 'student' && $student && $exam) {
     $scheduleRows = admitCardGetScheduleRows($student, $exam, [
@@ -296,6 +308,8 @@ if ($mode === 'student' && $student && $exam) {
         'options' => [
             'issue_date' => $issueDate,
             'admit_no' => trim((string)($student['admission_no'] ?? '')) . '-' . intval($exam['exam_id'] ?? 0),
+            'show_pending_balance' => $showPendingBalance ? 1 : 0,
+            'pending_balance_label' => $showPendingBalance ? admitCardBuildPendingBalanceNote($student, ['show_pending_balance' => true, 'issue_date' => $issueDate]) : '',
         ],
     ];
 
@@ -331,6 +345,8 @@ if ($mode === 'student' && $student && $exam) {
                 'options' => [
                     'issue_date' => $issueDate,
                     'admit_no' => trim((string)($studentRow['admission_no'] ?? '')) . '-' . intval($exam['exam_id'] ?? 0),
+                    'show_pending_balance' => $showPendingBalance ? 1 : 0,
+                    'pending_balance_label' => $showPendingBalance ? admitCardBuildPendingBalanceNote($studentRow, ['show_pending_balance' => true, 'issue_date' => $issueDate]) : '',
                 ],
             ];
         }
@@ -353,6 +369,8 @@ if ($canGenerate) {
         $documentTitle = admitCardBuildDownloadName($studentRow, $exam, $mode);
         $payload = studentPortalBuildDocumentPayload($studentRow, $exam, $schoolSettings, $issueDate, '');
         $payload['schedule_rows'] = is_array($card['schedule_rows'] ?? null) ? $card['schedule_rows'] : [];
+        $payload['show_pending_balance'] = $showPendingBalance ? 1 : 0;
+        $payload['pending_balance_label'] = $showPendingBalance ? admitCardBuildPendingBalanceNote($studentRow, ['show_pending_balance' => true, 'issue_date' => $issueDate]) : '';
         studentPortalSaveDocument([
             'student_id' => intval($studentRow['student_id'] ?? 0),
             'document_type' => 'admit_card',
@@ -380,6 +398,7 @@ if ($canGenerate) {
             'issue_date' => $issueDate,
             'paper_size' => $paperSize,
             'publish_to_student' => $publishToStudent ? 1 : null,
+            'show_pending_balance' => $showPendingBalance ? 1 : null,
         ])),
         'download_url' => APP_URL . '/modules/reports/admit_cards.php?' . http_build_query(array_filter([
             'mode' => $mode,
@@ -391,6 +410,7 @@ if ($canGenerate) {
             'issue_date' => $issueDate,
             'paper_size' => $paperSize,
             'publish_to_student' => $publishToStudent ? 1 : null,
+            'show_pending_balance' => $showPendingBalance ? 1 : null,
             'download' => 'pdf',
         ])),
         'show_toolbar' => true,
@@ -401,7 +421,10 @@ if ($canGenerate) {
 
     if ($downloadPdf) {
         $downloadName = admitCardBuildDownloadName($student ?: ($cards[0]['student'] ?? []), $exam, $mode);
-        $pdfResult = pdfExportDownloadHtml($html, $downloadName);
+        $pdfResult = pdfExportDownloadHtml($html, $downloadName, [
+            'paper_size' => $paperSize,
+            'paper_orientation' => $paperSize === 'A5' ? 'landscape' : 'portrait',
+        ]);
         if (!empty($pdfResult['success'])) {
             exit();
         }
@@ -416,6 +439,7 @@ if ($canGenerate) {
             'issue_date' => $issueDate,
             'paper_size' => $paperSize,
             'publish_to_student' => $publishToStudent ? 1 : null,
+            'show_pending_balance' => $showPendingBalance ? 1 : null,
         ]));
 
         alertAndRedirect(
@@ -620,20 +644,31 @@ include '../../includes/header.php';
 
             <div class="col-lg-4 col-md-6">
                 <label class="form-label">Issue Date</label>
-                <input type="date" name="issue_date" class="form-control" value="<?php echo htmlspecialchars($issueDate); ?>">
+                <input type="date" name="issue_date" id="issue_date" class="form-control" value="<?php echo htmlspecialchars($issueDate); ?>">
             </div>
 
-            <div class="col-lg-4 col-md-6 d-flex align-items-end">
-                <div class="form-check">
+            <div class="col-lg-4 col-md-6">
+                <div class="form-check mt-4">
                     <input class="form-check-input" type="checkbox" value="1" id="publish_to_student" name="publish_to_student" <?php echo $publishToStudent ? 'checked' : ''; ?>>
                     <label class="form-check-label" for="publish_to_student">
                         Make visible in student portal
                     </label>
                 </div>
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" value="1" id="show_pending_balance" name="show_pending_balance" <?php echo $showPendingBalance ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="show_pending_balance">
+                        Show Pending Balance
+                        <span
+                            id="pending_balance_amount_label"
+                            class="text-danger fw-semibold ms-1<?php echo $pendingBalanceAmountLabel !== '' ? '' : ' d-none'; ?>"
+                        ><?php echo $pendingBalanceAmountLabel !== '' ? '(' . htmlspecialchars($pendingBalanceAmountLabel) . ')' : ''; ?></span>
+                    </label>
+                    <small class="text-muted d-block ms-4">Shows the pending balance amount beside the student name when dues exist.</small>
+                </div>
             </div>
 
             <?php if ($mode === 'student'): ?>
-                <div class="col-md-8">
+                <div class="col-12">
                     <label class="form-label">Student Search</label>
                     <input type="hidden" name="student_id" id="student_id" value="<?php echo intval($student['student_id'] ?? 0); ?>">
                     <input
@@ -649,12 +684,17 @@ include '../../includes/header.php';
                         data-student-autocomplete-id-target="#student_id"
                     >
                 </div>
-                <div class="col-md-4">
-                    <div class="alert alert-info mb-0">
-                        <strong>Selected student:</strong><br>
-                        <?php echo htmlspecialchars($student['student_name'] ?? 'Select a student'); ?>
+                <?php if (!empty($student['student_id'])): ?>
+                    <div class="col-12">
+                        <div class="alert alert-info mb-0 py-2">
+                            <div class="fw-semibold"><?php echo htmlspecialchars($student['student_name'] ?? 'Student'); ?></div>
+                            <div class="small text-muted">
+                                Adm No: <?php echo htmlspecialchars($student['admission_no'] ?? '-'); ?> |
+                                Class: <?php echo htmlspecialchars(trim((string)($student['class_name'] ?? '') . ' ' . (string)($student['section_name'] ?? '')) ?: '-'); ?>
+                            </div>
+                        </div>
                     </div>
-                </div>
+                <?php endif; ?>
             <?php else: ?>
                 <div class="col-md-4">
                     <label class="form-label">Class</label>

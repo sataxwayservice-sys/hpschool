@@ -21,11 +21,11 @@ define('FIREBASE_APP_ID', 'your-app-id');
 define('FIREBASE_SERVICE_ACCOUNT_PATH', BASE_PATH . '/config/firebase-service-account.json');
 
 // Firebase Realtime Database Configuration
-define('FIREBASE_BACKUP_ENABLED', true);
-define('FIREBASE_AUTO_SYNC', true); // Auto sync on INSERT/UPDATE/DELETE
+define('FIREBASE_BACKUP_ENABLED', false);
+define('FIREBASE_AUTO_SYNC', false); // Enable only after adding real Firebase credentials
 
 // SMS Configuration via Firebase Cloud Functions
-define('FIREBASE_SMS_ENABLED', true);
+define('FIREBASE_SMS_ENABLED', false);
 define('FIREBASE_SMS_FUNCTION_URL', 'https://your-region-your-project.cloudfunctions.net/sendSMS');
 
 /**
@@ -53,7 +53,13 @@ function getFirebaseAdmin() {
 
     if ($firebase === null && file_exists(FIREBASE_SERVICE_ACCOUNT_PATH)) {
         try {
-            require_once BASE_PATH . '/vendor/autoload.php';
+            $autoloadPath = BASE_PATH . '/vendor/autoload.php';
+            if (!file_exists($autoloadPath)) {
+                error_log("Firebase Admin SDK disabled: vendor/autoload.php not found.");
+                return null;
+            }
+
+            require_once $autoloadPath;
 
             $factory = (new \Kreait\Firebase\Factory)
                 ->withServiceAccount(FIREBASE_SERVICE_ACCOUNT_PATH)
@@ -169,24 +175,52 @@ function sendSMSViaFirebase($mobile, $message) {
             'timestamp' => time()
         ];
 
-        $options = [
-            'http' => [
-                'header'  => "Content-type: application/json\r\n",
-                'method'  => 'POST',
-                'content' => json_encode($data),
-                'ignore_errors' => true,
-                'timeout' => 15,
-            ]
-        ];
-
-        $context = stream_context_create($options);
-        $result = @file_get_contents($functionUrl, false, $context);
+        $payload = json_encode($data);
+        $result = false;
         $httpCode = null;
-        if (!empty($http_response_header) && is_array($http_response_header)) {
-            foreach ($http_response_header as $headerLine) {
-                if (preg_match('/^HTTP\/\S+\s+(\d{3})\b/', $headerLine, $matches)) {
-                    $httpCode = intval($matches[1]);
-                    break;
+
+        if (function_exists('curl_init')) {
+            $ch = curl_init($functionUrl);
+            if ($ch !== false) {
+                curl_setopt_array($ch, [
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => $payload,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_TIMEOUT => 15,
+                    CURLOPT_CONNECTTIMEOUT => 10,
+                    CURLOPT_FOLLOWLOCATION => true,
+                ]);
+
+                $result = curl_exec($ch);
+                if ($result !== false) {
+                    $httpCode = intval(curl_getinfo($ch, CURLINFO_HTTP_CODE));
+                }
+                if ($result === false) {
+                    $errorMessage = curl_error($ch);
+                    error_log('Firebase SMS cURL error: ' . $errorMessage . ' URL=' . $functionUrl);
+                }
+                curl_close($ch);
+            }
+        } else {
+            $options = [
+                'http' => [
+                    'header'  => "Content-type: application/json\r\n",
+                    'method'  => 'POST',
+                    'content' => $payload,
+                    'ignore_errors' => true,
+                    'timeout' => 15,
+                ]
+            ];
+
+            $context = stream_context_create($options);
+            $result = @file_get_contents($functionUrl, false, $context);
+            if (!empty($http_response_header) && is_array($http_response_header)) {
+                foreach ($http_response_header as $headerLine) {
+                    if (preg_match('/^HTTP\/\S+\s+(\d{3})\b/', $headerLine, $matches)) {
+                        $httpCode = intval($matches[1]);
+                        break;
+                    }
                 }
             }
         }

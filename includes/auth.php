@@ -18,7 +18,31 @@ function isLoggedIn() {
  */
 function requireLogin() {
     if (!isLoggedIn()) {
-        redirect(APP_URL . '/modules/auth/login.php');
+        $requestUri = trim((string)($_SERVER['REQUEST_URI'] ?? ''));
+        $redirectTarget = '';
+        $appPath = rtrim((string)(parse_url(APP_URL, PHP_URL_PATH) ?? ''), '/');
+
+        if ($requestUri !== '') {
+            $parsed = parse_url($requestUri);
+            $path = trim((string)($parsed['path'] ?? ''));
+            if ($appPath !== '' && strpos($path, $appPath) === 0) {
+                $path = substr($path, strlen($appPath));
+            }
+            $path = '/' . ltrim($path, '/');
+            if ($path !== '' && strpos($path, '//') !== 0) {
+                $redirectTarget = $path;
+                if (!empty($parsed['query'])) {
+                    $redirectTarget .= '?' . $parsed['query'];
+                }
+            }
+        }
+
+        $loginUrl = APP_URL . '/modules/auth/login.php';
+        if ($redirectTarget !== '') {
+            $loginUrl .= '?redirect=' . urlencode($redirectTarget);
+        }
+
+        redirect($loginUrl);
     }
 }
 
@@ -76,6 +100,25 @@ function normalizePermissionAction($action) {
     ];
 
     return $aliases[$action] ?? $action;
+}
+
+/**
+ * Backward-compatible password comparison.
+ * Supports both modern hashed passwords and older legacy plain-text rows
+ * during migration to hosted environments.
+ */
+if (!function_exists('passwordMatchesCompat')) {
+    function passwordMatchesCompat(string $plainPassword, string $storedPassword): bool {
+        if ($storedPassword === '') {
+            return false;
+        }
+
+        if (password_verify($plainPassword, $storedPassword)) {
+            return true;
+        }
+
+        return hash_equals($storedPassword, $plainPassword);
+    }
 }
 
 /**
@@ -196,25 +239,37 @@ function loginUser($username, $password) {
 
     $username = trim((string) $username);
 
-    // Get user by username or email so we can show pending/blocked messages too
-    $query = "SELECT * FROM users WHERE (username = ? OR email = ?) LIMIT 1";
-    $user = fetchOne($query, 'ss', [$username, $username]);
+    // Get all matching users so we can avoid collisions and still surface pending/blocked messages.
+    $query = "SELECT * FROM users
+              WHERE username = ? OR email = ? OR full_name = ?
+              ORDER BY CASE WHEN role = 'super_admin' THEN 0 ELSE 1 END, user_id ASC";
+    $candidates = fetchAll($query, 'sss', [$username, $username, $username]);
 
-    if (!$user) {
+    if (empty($candidates)) {
         return ['success' => false, 'message' => 'Invalid username or password.'];
     }
 
-    if (function_exists('schoolRegistrationGetLoginStatusMessage')) {
-        $statusMessage = schoolRegistrationGetLoginStatusMessage($user);
-        if ($statusMessage !== '') {
-            return ['success' => false, 'message' => $statusMessage];
+    $user = null;
+    foreach ($candidates as $candidate) {
+        $candidatePassword = (string)($candidate['password'] ?? '');
+        if (!passwordMatchesCompat($password, $candidatePassword)) {
+            continue;
         }
-    } elseif (intval($user['is_active'] ?? 0) !== 1) {
-        return ['success' => false, 'message' => 'Your account is inactive. Please contact the school office.'];
+
+        if (function_exists('schoolRegistrationGetLoginStatusMessage')) {
+            $statusMessage = schoolRegistrationGetLoginStatusMessage($candidate);
+            if ($statusMessage !== '') {
+                return ['success' => false, 'message' => $statusMessage];
+            }
+        } elseif (intval($candidate['is_active'] ?? 0) !== 1) {
+            return ['success' => false, 'message' => 'Your account is inactive. Please contact the school office.'];
+        }
+
+        $user = $candidate;
+        break;
     }
 
-    // Verify password
-    if (!password_verify($password, $user['password'])) {
+    if (!$user) {
         return ['success' => false, 'message' => 'Invalid username or password.'];
     }
 

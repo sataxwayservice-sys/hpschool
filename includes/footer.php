@@ -12,7 +12,7 @@
                 </div>
                 <div class="col-md-6 text-center text-md-end">
                     <p class="mb-0 text-muted">
-                        Version <?php echo APP_VERSION; ?> | Powered by School Management System
+                        Version <?php echo APP_VERSION; ?> | Powered by <?php echo htmlspecialchars(APP_NAME); ?>
                     </p>
                 </div>
             </div>

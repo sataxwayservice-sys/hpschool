@@ -48,6 +48,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
+        if ($currentSchoolId > 0) {
+            $studentLimit = getSchoolStudentAddLimit($currentSchoolId);
+            $activeStudentCount = getSchoolActiveStudentCount($currentSchoolId);
+            if ($studentLimit > 0 && $activeStudentCount >= $studentLimit) {
+                $errors[] = 'Student admission limit reached for this school (' . number_format($activeStudentCount) . '/' . number_format($studentLimit) . '). Please ask Super Admin to increase the limit.';
+            }
+        }
+    }
+
+    if (empty($errors)) {
         // Sanitize inputs
         $studentName = sanitize($_POST['student_name']);
         $dateOfBirth = sanitize($_POST['date_of_birth']);
@@ -85,10 +95,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     school_id, admission_no, student_name, date_of_birth, gender,
                     class_id, section_id, roll_no, address,
                     father_name, mother_name, contact_no, email,
-                    admission_date, photo, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')";
+                    admission_date, photo, status, attendance_auto_alert_disabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-                $result = executeQuery($query, 'issssiiisssssss', [
+                $result = executeQuery($query, str_repeat('s', 17), [
                     $currentSchoolId,
                     $admissionNo,
                     $studentName,
@@ -103,7 +113,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $contactNo,
                     $email,
                     $admissionDate,
-                    $photoFilename
+                    $photoFilename,
+                    'Active',
+                    isset($_POST['attendance_auto_alert_disabled']) ? 1 : 0
                 ]);
 
                 if ($result === false) {
@@ -343,6 +355,13 @@ include '../../includes/header.php';
                             <input type="email" class="form-control" id="email" name="email"
                                    placeholder="email@example.com">
                         </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="attendance_auto_alert_disabled" name="attendance_auto_alert_disabled">
+                        <label class="form-check-label" for="attendance_auto_alert_disabled">
+                            Disable automatic absent SMS for this student
+                        </label>
                     </div>
 
                     <!-- Submit Buttons -->

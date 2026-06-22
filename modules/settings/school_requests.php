@@ -53,6 +53,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $selectedSchoolId = intval($_GET['id'] ?? 0);
 $selectedSchool = $selectedSchoolId > 0 ? schoolRegistrationGetSchoolById($selectedSchoolId) : null;
+$selectedSettings = $selectedSchoolId > 0 ? getSchoolSettingsBySchoolId($selectedSchoolId) : null;
+$selectedPlan = trim((string)($selectedSettings['subscription_plan'] ?? 'free'));
+$selectedPrice = floatval($selectedSettings['subscription_price'] ?? 0);
 $allRequests = schoolRegistrationGetRequests('', 200);
 $pendingRequests = schoolRegistrationGetRequests('pending', 50);
 $approvedRequests = schoolRegistrationGetRequests('approved', 50);
@@ -168,6 +171,18 @@ include '../../includes/header.php';
                             </div>
                         </div>
                         <div class="col-md-4">
+                            <strong>Subscription Plan</strong>
+                            <div><?php echo htmlspecialchars(ucfirst((string)($selectedSettings['subscription_plan'] ?? 'free'))); ?></div>
+                        </div>
+                        <div class="col-md-4">
+                            <strong>Subscription Price</strong>
+                            <div><?php echo htmlspecialchars(formatCurrency(floatval($selectedSettings['subscription_price'] ?? 0))); ?></div>
+                        </div>
+                        <div class="col-md-4">
+                            <strong>Ads</strong>
+                            <div><?php echo intval($selectedSettings['ads_enabled'] ?? 1) === 1 ? 'Enabled' : 'Hidden'; ?></div>
+                        </div>
+                        <div class="col-md-4">
                             <strong>Admin Name</strong>
                             <div><?php echo htmlspecialchars($selectedSchool['admin_name'] ?? '-'); ?></div>
                         </div>
@@ -232,6 +247,9 @@ include '../../includes/header.php';
                                 </button>
                             </form>
                         <?php endif; ?>
+                        <a href="<?php echo APP_URL; ?>/modules/settings/subscriptions.php?school_id=<?php echo intval($selectedSchool['school_id']); ?>" class="btn btn-outline-primary">
+                            <i class="bi bi-credit-card-2-front"></i> Manage Subscription
+                        </a>
                         <?php if (!in_array(strtolower((string)($selectedSchool['status'] ?? 'pending')), ['approved', 'active'], true)): ?>
                             <form method="POST" action="" class="d-inline">
                                 <input type="hidden" name="school_id" value="<?php echo intval($selectedSchool['school_id']); ?>">

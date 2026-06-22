@@ -13,8 +13,13 @@ requirePermission('fees', 'add');
 
 $pageTitle = 'Fee Structure';
 $currentUser = getCurrentUser();
+$currentSchoolId = function_exists('getCurrentSchoolId') ? intval(getCurrentSchoolId()) : 0;
 $error = '';
 $success = '';
+
+if (function_exists('ensureFeeModuleSchema')) {
+    ensureFeeModuleSchema();
+}
 
 // Get student ID if provided
 $studentId = isset($_GET['student_id']) ? intval($_GET['student_id']) : 0;
@@ -26,20 +31,52 @@ if ($studentId > 0) {
               JOIN classes c ON s.class_id = c.class_id
               JOIN sections sec ON s.section_id = sec.section_id
               WHERE s.student_id = ? AND s.status = 'Active'";
-    $student = fetchOne($query, 'i', [$studentId]);
+    $params = [$studentId];
+    $types = 'i';
+
+    if ($currentSchoolId > 0) {
+        $query .= " AND COALESCE(s.school_id, 0) = ?";
+        $params[] = $currentSchoolId;
+        $types .= 'i';
+    }
+
+    $student = fetchOne($query, $types, $params);
 }
 
 // Get all fee heads
-$feeHeads = fetchAll("SELECT * FROM fee_heads WHERE is_active = 1 ORDER BY fee_head_id");
+$feeHeadsQuery = "SELECT * FROM fee_heads WHERE is_active = 1";
+$feeHeadsParams = [];
+$feeHeadsTypes = '';
+if ($currentSchoolId > 0) {
+    $feeHeadsQuery .= " AND COALESCE(school_id, 0) = ?";
+    $feeHeadsParams[] = $currentSchoolId;
+    $feeHeadsTypes .= 'i';
+}
+$feeHeadsQuery .= " ORDER BY fee_head_id";
+$feeHeads = empty($feeHeadsTypes) ? fetchAll($feeHeadsQuery) : fetchAll($feeHeadsQuery, $feeHeadsTypes, $feeHeadsParams);
 
 // Debug: Check if fee heads exist at all
 if (empty($feeHeads)) {
-    $allFeeHeads = fetchAll("SELECT * FROM fee_heads");
+    $allFeeHeadsQuery = "SELECT * FROM fee_heads";
+    $allFeeHeadsParams = [];
+    $allFeeHeadsTypes = '';
+    if ($currentSchoolId > 0) {
+        $allFeeHeadsQuery .= " WHERE COALESCE(school_id, 0) = ?";
+        $allFeeHeadsParams[] = $currentSchoolId;
+        $allFeeHeadsTypes .= 'i';
+    }
+    $allFeeHeads = empty($allFeeHeadsTypes)
+        ? fetchAll($allFeeHeadsQuery)
+        : fetchAll($allFeeHeadsQuery, $allFeeHeadsTypes, $allFeeHeadsParams);
     if (empty($allFeeHeads)) {
-        $error = 'No fee heads found in the system! Please add fee heads first from Settings → Fee Heads.';
+        $error = $currentSchoolId > 0
+            ? 'No fee heads found for this school! Please add fee heads first from Settings → Fee Heads.'
+            : 'No fee heads found in the system! Please add fee heads first from Settings → Fee Heads.';
     } else {
         $inactiveCount = count($allFeeHeads);
-        $error = "All $inactiveCount fee heads are inactive! Please activate at least one fee head from Settings → Fee Heads.";
+        $error = $currentSchoolId > 0
+            ? "All $inactiveCount fee heads for this school are inactive! Please activate at least one fee head from Settings → Fee Heads."
+            : "All $inactiveCount fee heads are inactive! Please activate at least one fee head from Settings → Fee Heads.";
     }
 }
 
@@ -49,11 +86,15 @@ $hasDuplicates = false;
 $duplicateFees = [];
 
 if ($studentId > 0) {
-    $existingFees = fetchAll(
-        "SELECT * FROM fee_structure WHERE student_id = ? AND is_active = 1",
-        'i',
-        [$studentId]
-    );
+    $existingFeesQuery = "SELECT * FROM fee_structure WHERE student_id = ? AND is_active = 1";
+    $existingFeesParams = [$studentId];
+    $existingFeesTypes = 'i';
+    if ($currentSchoolId > 0) {
+        $existingFeesQuery .= " AND COALESCE(school_id, 0) = ?";
+        $existingFeesParams[] = $currentSchoolId;
+        $existingFeesTypes .= 'i';
+    }
+    $existingFees = fetchAll($existingFeesQuery, $existingFeesTypes, $existingFeesParams);
 
     // Check for duplicates and convert to associative array by fee_head_id
     $feeHeadCounts = [];
@@ -104,26 +145,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_structure'])) {
         beginTransaction();
         try {
             // Deactivate old fee structure
-            executeQuery(
-                "UPDATE fee_structure SET is_active = 0 WHERE student_id = ?",
-                'i',
-                [$studentId]
-            );
+            $deactivateQuery = "UPDATE fee_structure SET is_active = 0 WHERE student_id = ?";
+            $deactivateParams = [$studentId];
+            $deactivateTypes = 'i';
+            if ($currentSchoolId > 0) {
+                $deactivateQuery .= " AND COALESCE(school_id, 0) = ?";
+                $deactivateParams[] = $currentSchoolId;
+                $deactivateTypes .= 'i';
+            }
+            executeQuery($deactivateQuery, $deactivateTypes, $deactivateParams);
 
             // Insert new fee structure
             $insertedCount = 0;
             foreach ($feeAmounts as $feeHeadId => $amount) {
                 if (!empty($amount) && $amount > 0) {
                     $query = "INSERT INTO fee_structure
-                             (student_id, fee_head_id, amount, effective_from, is_active, created_by)
-                             VALUES (?, ?, ?, ?, 1, ?)";
-                    executeQuery($query, 'iidsi', [
+                             (student_id, fee_head_id, amount, effective_from, is_active, created_by";
+                    $types = 'iidsi';
+                    $params = [
                         $studentId,
                         $feeHeadId,
                         $amount,
                         $effectiveFrom,
                         $currentUser['user_id']
-                    ]);
+                    ];
+
+                    if ($currentSchoolId > 0) {
+                        $query .= ", school_id";
+                        $types .= 'i';
+                        $params[] = $currentSchoolId;
+                    }
+
+                    $query .= ") VALUES (?, ?, ?, ?, 1, ?";
+                    if ($currentSchoolId > 0) {
+                        $query .= ", ?";
+                    }
+                    $query .= ")";
+
+                    executeQuery($query, $types, $params);
                     $insertedCount++;
                 }
             }
@@ -138,9 +197,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_structure'])) {
 
                 // Reload existing fees
                 $existingFees = fetchAll(
-                    "SELECT * FROM fee_structure WHERE student_id = ? AND is_active = 1",
-                    'i',
-                    [$studentId]
+                    $existingFeesQuery,
+                    $existingFeesTypes,
+                    $existingFeesParams
                 );
                 $tempFees = [];
                 foreach ($existingFees as $fee) {
@@ -224,8 +283,16 @@ include '../../includes/header.php';
                                    JOIN sections sec ON s.section_id = sec.section_id
                                    WHERE (s.admission_no LIKE ? OR s.student_name LIKE ?)
                                    AND s.status = 'Active'
-                                   LIMIT 10";
-                    $students = fetchAll($searchQuery, 'ss', ['%' . $searchTerm . '%', '%' . $searchTerm . '%']);
+                                   ";
+                    $searchParams = ['%' . $searchTerm . '%', '%' . $searchTerm . '%'];
+                    $searchTypes = 'ss';
+                    if ($currentSchoolId > 0) {
+                        $searchQuery .= " AND COALESCE(s.school_id, 0) = ?";
+                        $searchParams[] = $currentSchoolId;
+                        $searchTypes .= 'i';
+                    }
+                    $searchQuery .= " LIMIT 10";
+                    $students = fetchAll($searchQuery, $searchTypes, $searchParams);
                     ?>
 
                     <?php if (count($students) > 0): ?>

@@ -12,6 +12,7 @@ if (isLoggedIn()) {
 
 $pageTitle = 'Super Admin Login';
 $error = '';
+$superAdminExists = function_exists('superAdminExists') ? superAdminExists() : false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $identifier = sanitize($_POST['username'] ?? '');
@@ -20,37 +21,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($identifier === '' || $password === '') {
         $error = 'Username and password are required.';
     } else {
-        $user = fetchOne(
+        $users = fetchAll(
             "SELECT user_id, username, email, full_name, role, password, status, status_reason, is_active, school_id, student_id
              FROM users
-             WHERE (username = ? OR email = ?) AND role = 'super_admin'
-             LIMIT 1",
-            'ss',
-            [$identifier, $identifier]
+             WHERE (username = ? OR email = ? OR full_name = ?) AND role = 'super_admin'
+             ORDER BY user_id ASC",
+            'sss',
+            [$identifier, $identifier, $identifier]
         );
 
-        if (!$user) {
-            $error = 'Invalid super admin username or password.';
+        if (empty($users)) {
+            $error = $superAdminExists
+                ? 'Invalid super admin username or password.'
+                : 'No super admin account exists on this database yet. Use setup.php or fix_login_now.php to create one first.';
         } else {
-            $status = strtolower(trim((string)($user['status'] ?? '')));
-            $reason = trim((string)($user['status_reason'] ?? ''));
-            $isActive = intval($user['is_active'] ?? 0) === 1;
+            $user = null;
+            foreach ($users as $candidate) {
+                $storedPassword = (string)($candidate['password'] ?? '');
+                $passwordOk = function_exists('passwordMatchesCompat')
+                    ? passwordMatchesCompat($password, $storedPassword)
+                    : (password_verify($password, $storedPassword) || hash_equals($storedPassword, $password));
 
-            if ($status === 'pending') {
-                $error = 'Your super admin account is pending approval.';
-            } elseif ($status === 'rejected') {
-                $error = $reason !== ''
-                    ? 'Your super admin account was rejected. ' . $reason
-                    : 'Your super admin account was rejected.';
-            } elseif ($status === 'blocked') {
-                $error = $reason !== ''
-                    ? 'Your super admin account has been blocked. ' . $reason
-                    : 'Your super admin account has been blocked.';
-            } elseif (!$isActive) {
-                $error = 'Your super admin account is inactive. Please contact support.';
-            } elseif (!password_verify($password, $user['password'])) {
-                $error = 'Invalid super admin username or password.';
-            } else {
+                if (!$passwordOk) {
+                    continue;
+                }
+
+                $status = strtolower(trim((string)($candidate['status'] ?? '')));
+                $reason = trim((string)($candidate['status_reason'] ?? ''));
+                $isActive = intval($candidate['is_active'] ?? 0) === 1;
+
+                if ($status === 'pending') {
+                    $error = 'Your super admin account is pending approval.';
+                } elseif ($status === 'rejected') {
+                    $error = $reason !== ''
+                        ? 'Your super admin account was rejected. ' . $reason
+                        : 'Your super admin account was rejected.';
+                } elseif ($status === 'blocked') {
+                    $error = $reason !== ''
+                        ? 'Your super admin account has been blocked. ' . $reason
+                        : 'Your super admin account has been blocked.';
+                } elseif (!$isActive) {
+                    $error = 'Your super admin account is inactive. Please contact support.';
+                } else {
+                    $user = $candidate;
+                }
+
+                if ($user || $error !== '') {
+                    break;
+                }
+            }
+
+            if ($user) {
                 $_SESSION['user_id'] = $user['user_id'];
                 $_SESSION['username'] = $user['username'];
                 $_SESSION['full_name'] = $user['full_name'];
@@ -67,6 +88,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 logActivity($user['user_id'], 'Login', 'Authentication', 'Super admin logged in successfully');
                 redirect(getUserHomeUrl($user));
+            } elseif ($error === '') {
+                $error = 'Invalid super admin username or password.';
             }
         }
     }
@@ -244,4 +267,3 @@ $staffLoginUrl = APP_URL . '/modules/auth/login.php';
 
 </body>
 </html>
-

@@ -162,13 +162,160 @@ window.jQuery(function($) {
     }
 
     // Loading overlay
+    const PAGE_LOADING_OVERLAY_ID = 'page-loading-overlay';
+
+    function buildLoadingOverlayHtml() {
+        return `
+            <div class="loading-dots-panel" role="status" aria-live="polite" aria-atomic="true">
+                <div class="loading-dots" aria-hidden="true">
+                    <span class="loading-dot"></span>
+                    <span class="loading-dot"></span>
+                    <span class="loading-dot"></span>
+                    <span class="loading-dot"></span>
+                    <span class="loading-dot"></span>
+                </div>
+                <div class="loading-dots-text">Loading next page...</div>
+            </div>
+        `;
+    }
+
     window.showLoading = function() {
-        $('body').append('<div class="spinner-overlay"><div class="spinner-border text-light" role="status"></div></div>');
+        let $overlay = $('#' + PAGE_LOADING_OVERLAY_ID);
+
+        if (!$overlay.length) {
+            $overlay = $('<div>', {
+                id: PAGE_LOADING_OVERLAY_ID,
+                class: 'spinner-overlay'
+            }).html(buildLoadingOverlayHtml());
+            $('body').append($overlay);
+        }
+
+        $overlay.removeClass('d-none');
+        window.requestAnimationFrame(function() {
+            $overlay.addClass('is-visible');
+        });
+
+        return $overlay;
     }
 
     window.hideLoading = function() {
-        $('.spinner-overlay').remove();
+        const $overlay = $('#' + PAGE_LOADING_OVERLAY_ID);
+        if (!$overlay.length) {
+            return;
+        }
+
+        $overlay.removeClass('is-visible');
+        window.setTimeout(function() {
+            $overlay.remove();
+        }, 180);
     }
+
+    function navigateWithLoading(targetHref) {
+        const startedAt = window.performance && typeof window.performance.now === 'function'
+            ? window.performance.now()
+            : Date.now();
+
+        showLoading();
+
+        window.requestAnimationFrame(function() {
+            window.requestAnimationFrame(function() {
+                const now = window.performance && typeof window.performance.now === 'function'
+                    ? window.performance.now()
+                    : Date.now();
+                const elapsed = now - startedAt;
+                const remaining = Math.max(240 - elapsed, 0);
+
+                window.setTimeout(function() {
+                    window.location.href = targetHref;
+                }, remaining);
+            });
+        });
+    }
+
+    function shouldShowPageTransitionLoader(anchor) {
+        if (!anchor || !anchor.getAttribute) {
+            return false;
+        }
+
+        const href = String(anchor.getAttribute('href') || '').trim();
+        if (!href || href === '#' || href.indexOf('javascript:') === 0 || href.indexOf('mailto:') === 0 || href.indexOf('tel:') === 0) {
+            return false;
+        }
+
+        const target = String(anchor.getAttribute('target') || '').trim().toLowerCase();
+        if (target && target !== '_self') {
+            return false;
+        }
+
+        if (anchor.hasAttribute('download')) {
+            return false;
+        }
+
+        try {
+            const targetUrl = new URL(href, window.location.href);
+            if (targetUrl.origin !== window.location.origin) {
+                return false;
+            }
+
+            const currentUrl = new URL(window.location.href);
+            if (targetUrl.pathname === currentUrl.pathname && targetUrl.search === currentUrl.search && targetUrl.hash) {
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function bindPageTransitionLoader() {
+        document.addEventListener('click', function(event) {
+            const anchor = event.target.closest ? event.target.closest('a[href]') : null;
+            if (!anchor || !shouldShowPageTransitionLoader(anchor)) {
+                return;
+            }
+
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return;
+            }
+
+            if (anchor.closest('[data-no-loading="true"]')) {
+                return;
+            }
+
+            event.preventDefault();
+            const targetHref = anchor.href;
+            navigateWithLoading(targetHref);
+        }, true);
+
+        document.addEventListener('submit', function(event) {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) {
+                return;
+            }
+
+            if (form.classList.contains('ajax-form') || form.hasAttribute('data-no-loading')) {
+                return;
+            }
+
+            const target = String(form.getAttribute('target') || '').trim().toLowerCase();
+            if (target && target !== '_self') {
+                return;
+            }
+
+            showLoading();
+        }, true);
+
+        window.addEventListener('pageshow', function() {
+            hideLoading();
+        });
+
+        window.addEventListener('load', function() {
+            hideLoading();
+        });
+    }
+
+    bindPageTransitionLoader();
 
     // AJAX form submission
     $('.ajax-form').on('submit', function(e) {
@@ -922,3 +1069,139 @@ function isValidMobile(mobile) {
     const re = /^[0-9]{10}$/;
     return re.test(mobile);
 }
+
+// Live pending balance label for admit-card generators
+(function() {
+    const pendingFeesApiUrl = APP_BASE_URL + '/api/get_pending_fees.php';
+    let pendingBalanceRequest = null;
+
+    function getStudentIdInput() {
+        return document.getElementById('student_id');
+    }
+
+    function getIssueDateInput() {
+        return document.getElementById('issue_date') || document.querySelector('input[name="issue_date"]');
+    }
+
+    function getShowPendingBalanceCheckbox() {
+        return document.getElementById('show_pending_balance');
+    }
+
+    function getPendingBalanceLabel() {
+        return document.getElementById('pending_balance_amount_label');
+    }
+
+    function setPendingBalanceLabel(labelText) {
+        const label = getPendingBalanceLabel();
+        if (!label) {
+            return;
+        }
+
+        const displayText = String(labelText || '').trim();
+        if (!displayText) {
+            label.textContent = '';
+            label.classList.add('d-none');
+            return;
+        }
+
+        label.textContent = '(' + displayText + ')';
+        label.classList.remove('d-none');
+    }
+
+    function hidePendingBalanceLabel() {
+        setPendingBalanceLabel('');
+    }
+
+    function refreshPendingBalanceLabel() {
+        const checkbox = getShowPendingBalanceCheckbox();
+        const label = getPendingBalanceLabel();
+        const studentInput = getStudentIdInput();
+        if (!checkbox || !label || !studentInput) {
+            return;
+        }
+
+        const studentId = parseInt(studentInput.value || '0', 10);
+        const issueDateInput = getIssueDateInput();
+        const issueDate = issueDateInput ? String(issueDateInput.value || '').trim() : '';
+
+        if (pendingBalanceRequest && typeof pendingBalanceRequest.abort === 'function') {
+            pendingBalanceRequest.abort();
+        }
+
+        if (!studentId) {
+            hidePendingBalanceLabel();
+            return;
+        }
+
+        pendingBalanceRequest = new AbortController();
+
+        const payload = new URLSearchParams();
+        payload.set('student_id', String(studentId));
+        if (issueDate) {
+            payload.set('issue_date', issueDate);
+        }
+
+        fetch(pendingFeesApiUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+            },
+            body: payload.toString(),
+            signal: pendingBalanceRequest.signal
+        })
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('Failed to load pending balance');
+                }
+                return response.json();
+            })
+            .then(function(data) {
+                const latestStudentId = parseInt(getStudentIdInput()?.value || '0', 10);
+                if (latestStudentId !== studentId) {
+                    return;
+                }
+
+                const dueTotal = parseFloat(data && data.due_total ? data.due_total : 0);
+                const dueLabel = String(data && data.due_label ? data.due_label : '').trim();
+
+                if (dueTotal > 0 && dueLabel !== '') {
+                    setPendingBalanceLabel(dueLabel);
+                } else {
+                    hidePendingBalanceLabel();
+                }
+            })
+            .catch(function(error) {
+                if (error && error.name === 'AbortError') {
+                    return;
+                }
+                hidePendingBalanceLabel();
+            });
+    }
+
+    function bindPendingBalanceListeners() {
+        const checkbox = getShowPendingBalanceCheckbox();
+        const label = getPendingBalanceLabel();
+        const studentInput = getStudentIdInput();
+        if (!checkbox || !label || !studentInput) {
+            return;
+        }
+
+        studentInput.addEventListener('change', refreshPendingBalanceLabel);
+        checkbox.addEventListener('change', refreshPendingBalanceLabel);
+
+        const issueDateInput = getIssueDateInput();
+        if (issueDateInput) {
+            issueDateInput.addEventListener('change', refreshPendingBalanceLabel);
+            issueDateInput.addEventListener('input', refreshPendingBalanceLabel);
+        }
+
+        refreshPendingBalanceLabel();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindPendingBalanceListeners);
+    } else {
+        bindPendingBalanceListeners();
+    }
+})();

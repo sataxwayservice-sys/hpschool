@@ -67,7 +67,10 @@ if ($selectedStudentId > 0 && $selectedExamId > 0) {
 
     if ($downloadPdf) {
         $downloadName = admitCardBuildDownloadName($student, $exam, 'parent');
-        $pdfResult = pdfExportDownloadHtml($html, $downloadName);
+        $pdfResult = pdfExportDownloadHtml($html, $downloadName, [
+            'paper_size' => 'A5',
+            'paper_orientation' => 'landscape',
+        ]);
         if (!empty($pdfResult['success'])) {
             exit();
         }

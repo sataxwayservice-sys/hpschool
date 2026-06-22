@@ -350,18 +350,15 @@ include '../../includes/header.php';
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="12" class="text-center">
-                                        <div class="alert alert-info mb-0">
-                                            <i class="bi bi-info-circle"></i> No receipts found!
-                                        </div>
-                                    </td>
-                                </tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
+                <?php if (count($receipts) === 0): ?>
+                    <div class="alert alert-info mt-3 mb-0">
+                        <i class="bi bi-info-circle"></i> No receipts found!
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>

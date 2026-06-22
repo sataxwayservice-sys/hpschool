@@ -10,6 +10,7 @@ if (!defined('APP_NAME')) {
 
 $currentUser = getCurrentUser();
 $schoolSettings = getSchoolSettings();
+$isSuperAdmin = strtolower(trim((string)($currentUser['role'] ?? ''))) === 'super_admin';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -71,7 +72,7 @@ $schoolSettings = getSchoolSettings();
                         </a>
                     </li>
 
-                    <?php if (hasPermission('students', 'view')): ?>
+                    <?php if (!$isSuperAdmin && hasPermission('students', 'view')): ?>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="bi bi-people"></i> Students
@@ -89,7 +90,7 @@ $schoolSettings = getSchoolSettings();
                     </li>
                     <?php endif; ?>
 
-                    <?php if (hasPermission('fees', 'view')): ?>
+                    <?php if (!$isSuperAdmin && hasPermission('fees', 'view')): ?>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="bi bi-cash-coin"></i> Fees
@@ -103,7 +104,7 @@ $schoolSettings = getSchoolSettings();
                     </li>
                     <?php endif; ?>
 
-                    <?php if (hasRole('teacher')): ?>
+                    <?php if (!$isSuperAdmin && hasRole('teacher')): ?>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="bi bi-journal-check"></i> Marks
@@ -115,7 +116,7 @@ $schoolSettings = getSchoolSettings();
                     </li>
                     <?php endif; ?>
 
-                    <?php if (hasPermission('reports', 'view') || hasPermission('students', 'view') || hasPermission('fees', 'view')): ?>
+                    <?php if (!$isSuperAdmin && (hasPermission('reports', 'view') || hasPermission('students', 'view') || hasPermission('fees', 'view'))): ?>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="bi bi-file-earmark-bar-graph"></i> Reports
@@ -125,6 +126,7 @@ $schoolSettings = getSchoolSettings();
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/reports/student_list.php">Student List</a></li>
                             <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/reports/class_wise_students.php">Class-wise Students</a></li>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/reports/attendance_report.php">Attendance Report</a></li>
                             <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/reports/fee_collection.php">Fee Collection</a></li>
                             <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/reports/today_collection.php">Today's Collection</a></li>
                             <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/reports/month_wise_collection.php">Month-wise Collection</a></li>
@@ -142,11 +144,18 @@ $schoolSettings = getSchoolSettings();
                             <i class="bi bi-gear"></i> Settings
                         </a>
                         <ul class="dropdown-menu">
-                            <?php if ($currentUser['role'] === 'super_admin'): ?>
-                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/dashboard/#super-admin-control-panel"><i class="bi bi-sliders"></i> Super Admin Portal</a></li>
+                            <?php if ($isSuperAdmin): ?>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/dashboard/#super-admin-control-panel"><i class="bi bi-sliders"></i> School Dashboard Control Panel</a></li>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/school_requests.php"><i class="bi bi-building-check"></i> School Requests</a></li>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/users.php"><i class="bi bi-people"></i> User Management</a></li>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/manage_permissions.php"><i class="bi bi-shield-lock"></i> Permissions</a></li>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/manage_permissions.php?role=admin#student-add-limit"><i class="bi bi-sliders2"></i> Student Add Limit</a></li>
                             <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/school_role_control.php"><i class="bi bi-person-gear"></i> School Role Control</a></li>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/subscriptions.php"><i class="bi bi-credit-card-2-front"></i> Subscriptions</a></li>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/school_ads.php"><i class="bi bi-megaphone"></i> School Ads</a></li>
+                            <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/recycle_bin.php"><i class="bi bi-trash"></i> Recycle Bin</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <?php endif; ?>
+                            <?php else: ?>
                             <?php if (hasRolePermissionForSchool('school_settings', 'view')): ?>
                             <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/school.php"><i class="bi bi-building"></i> School Settings</a></li>
                             <?php endif; ?>
@@ -169,12 +178,23 @@ $schoolSettings = getSchoolSettings();
                             <?php if (hasRolePermissionForSchool('recycle_bin', 'view')): ?>
                             <li><a class="dropdown-item" href="<?php echo APP_URL; ?>/modules/settings/recycle_bin.php"><i class="bi bi-trash"></i> Recycle Bin</a></li>
                             <?php endif; ?>
+                            <?php endif; ?>
                         </ul>
                     </li>
                     <?php endif; ?>
                 </ul>
 
-                <ul class="navbar-nav">
+                <ul class="navbar-nav align-items-lg-center">
+                    <?php if (!$isSuperAdmin && hasRolePermissionForSchool('attendance_scan', 'view')): ?>
+                    <li class="nav-item me-lg-2">
+                        <a class="nav-link px-2" href="<?php echo APP_URL; ?>/modules/attendance/scan.php"
+                           title="Attendance Scan"
+                           aria-label="Attendance Scan">
+                            <i class="bi bi-qr-code-scan fs-5"></i>
+                        </a>
+                    </li>
+                    <?php endif; ?>
+
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="bi bi-person-circle"></i> <?php echo htmlspecialchars($currentUser['full_name']); ?>
@@ -196,6 +216,86 @@ $schoolSettings = getSchoolSettings();
             </div>
         </div>
     </nav>
+
+    <?php
+    $headerAdSchoolId = function_exists('getCurrentSchoolId') ? getCurrentSchoolId() : 0;
+    $headerAds = [];
+    if ($headerAdSchoolId > 0 && function_exists('isSchoolAdsEnabled') && isSchoolAdsEnabled($headerAdSchoolId) && function_exists('getSchoolAdsForPlacement')) {
+        $headerAds = getSchoolAdsForPlacement($headerAdSchoolId, 'header_banner', 1);
+    }
+    ?>
+
+    <?php if (!empty($headerAds)): ?>
+        <div class="container-fluid mt-3">
+            <?php foreach ($headerAds as $ad): ?>
+                <?php
+                $adTitle = trim((string)($ad['title'] ?? ''));
+                $adType = strtolower(trim((string)($ad['ad_type'] ?? 'image')));
+                $adLink = trim((string)($ad['link_url'] ?? ''));
+                $adImage = trim((string)($ad['image_file'] ?? ''));
+                $adText = trim((string)($ad['content_text'] ?? ''));
+                $adHtml = trim((string)($ad['content_html'] ?? ''));
+                $adPreview = '';
+
+                if ($adType === 'image' && $adImage !== '' && function_exists('getSchoolAdImageSrc')) {
+                    $imgSrc = getSchoolAdImageSrc($adImage);
+                    if ($imgSrc !== '') {
+                        $imageTag = '<img src="' . htmlspecialchars($imgSrc) . '" alt="' . htmlspecialchars($adTitle) . '" class="img-fluid rounded" style="max-height:96px;object-fit:cover;">';
+                        $adPreview = $adLink !== ''
+                            ? '<a href="' . htmlspecialchars($adLink) . '" target="_blank" rel="noopener">' . $imageTag . '</a>'
+                            : $imageTag;
+                    }
+                } elseif ($adType === 'html' && $adHtml !== '') {
+                    $adPreview = '<div class="small">' . strip_tags($adHtml, '<a><div><span><p><strong><em><br><ul><ol><li>') . '</div>';
+                } else {
+                    $adPreview = '<div class="fw-semibold">' . htmlspecialchars($adTitle !== '' ? $adTitle : 'Sponsored Notice') . '</div>';
+                    if ($adText !== '') {
+                        $adPreview .= '<div class="small text-muted mt-1">' . nl2br(htmlspecialchars($adText)) . '</div>';
+                    }
+                    if ($adLink !== '') {
+                        $adPreview .= '<div class="mt-2"><a class="btn btn-sm btn-outline-primary" href="' . htmlspecialchars($adLink) . '" target="_blank" rel="noopener">Open Offer</a></div>';
+                    }
+                }
+                ?>
+                <div class="alert alert-light border shadow-sm py-3 mb-3" role="alert">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                        <div class="flex-grow-1">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <span class="badge bg-warning text-dark">School Ad</span>
+                                <span class="badge bg-secondary">Header Banner</span>
+                            </div>
+                            <?php echo $adPreview; ?>
+                        </div>
+                        <div class="text-muted small">Priority: <?php echo intval($ad['priority'] ?? 0); ?></div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php elseif (function_exists('isSchoolAdsEnabled') && isSchoolAdsEnabled()): ?>
+        <?php
+        $headerSubscriptionDetails = function_exists('getSchoolSubscriptionDetails')
+            ? getSchoolSubscriptionDetails($headerAdSchoolId)
+            : [];
+        $headerSubscriptionPlan = strtolower(trim((string)($headerSubscriptionDetails['subscription_plan'] ?? 'free')));
+        $headerSubscriptionCanUpgrade = true;
+        ?>
+        <div class="container-fluid mt-3">
+            <div class="alert alert-warning py-2 mb-0 d-flex align-items-center justify-content-between flex-wrap gap-2" role="alert">
+                <div>
+                    <i class="bi bi-megaphone"></i>
+                    <strong>Free plan active.</strong> Promotional ads are enabled for this school.
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="badge bg-dark">Upgrade to Premium to remove ads</span>
+                    <?php if ($headerSubscriptionCanUpgrade): ?>
+                    <a class="btn btn-sm btn-dark" href="<?php echo APP_URL; ?>/modules/settings/subscription_upgrade.php">
+                        <i class="bi bi-credit-card-2-front"></i> Choose Plan & Pay
+                    </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
 <?php endif; ?>
 
 <!-- Alert Messages -->

@@ -50,7 +50,7 @@ if (!function_exists('admitCardFormatTime')) {
             return $value;
         }
 
-        return strtolower(date('g.iA', $timestamp));
+        return date('h:i A', $timestamp);
     }
 }
 
@@ -79,6 +79,40 @@ if (!function_exists('admitCardNormalizeDisplayValue')) {
     function admitCardNormalizeDisplayValue($value, $fallback = '-') {
         $value = trim((string) $value);
         return $value !== '' ? $value : $fallback;
+    }
+}
+
+if (!function_exists('admitCardBuildPendingBalanceNote')) {
+    function admitCardBuildPendingBalanceNote(array $student = [], array $options = []) {
+        if (empty($options['show_pending_balance'])) {
+            return '';
+        }
+
+        if (!function_exists('getStudentFeeSummary')) {
+            return '';
+        }
+
+        $studentId = intval($student['student_id'] ?? 0);
+        if ($studentId <= 0) {
+            return '';
+        }
+
+        $issueDate = trim((string)($options['issue_date'] ?? ''));
+        if ($issueDate === '' || strtotime($issueDate) === false) {
+            $issueDate = date('Y-m-d');
+        }
+
+        $summary = getStudentFeeSummary($studentId, $issueDate);
+        $dueTotal = floatval($summary['due_total'] ?? 0);
+        if ($dueTotal <= 0) {
+            return '';
+        }
+
+        $amountLabel = function_exists('formatCurrency')
+            ? formatCurrency($dueTotal)
+            : '₹ ' . number_format($dueTotal, 2);
+
+        return 'Pending Balance till ' . date('F Y', strtotime($issueDate)) . ': ' . $amountLabel;
     }
 }
 
@@ -144,7 +178,7 @@ if (!function_exists('admitCardCalculateReportingTime')) {
             return '-';
         }
 
-        return date('g:i A', $reporting);
+        return date('h:i A', $reporting);
     }
 }
 
@@ -490,6 +524,7 @@ if (!function_exists('admitCardRenderSheetFragment')) {
         $dateOfBirth = admitCardFormatDate($student['date_of_birth'] ?? '', 'd M Y');
         $gender = admitCardNormalizeDisplayValue($student['gender'] ?? '', '-');
         $category = admitCardNormalizeDisplayValue($student['category'] ?? '', '-');
+        $pendingBalanceNote = admitCardBuildPendingBalanceNote($student, $options);
         $verificationText = implode('|', array_filter([
             $schoolDisplayName,
             'Examination Admit Card',
@@ -556,7 +591,12 @@ if (!function_exists('admitCardRenderSheetFragment')) {
             <table class="admit-simple-meta-table">
                 <tbody>
                     <tr>
-                        <td><strong>Name :</strong> <?php echo admitCardEscape($studentName); ?></td>
+                        <td>
+                            <strong>Name :</strong> <?php echo admitCardEscape($studentName); ?>
+                            <?php if ($pendingBalanceNote !== ''): ?>
+                                <span class="admit-pending-balance-note">(<?php echo admitCardEscape($pendingBalanceNote); ?>)</span>
+                            <?php endif; ?>
+                        </td>
                         <td><strong>Admission No :</strong> <?php echo admitCardEscape($admissionNo); ?></td>
                         <td><strong>Roll No :</strong> <?php echo admitCardEscape($rollNo); ?></td>
                     </tr>
@@ -1738,6 +1778,17 @@ if (!function_exists('admitCardRenderDocument')) {
                     line-height: 1.08;
                     color: #0f2a55;
                     text-transform: uppercase;
+                }
+
+                .admit-pending-balance-note {
+                    margin-left: 4px;
+                    color: #c81e1e;
+                    font-weight: 800;
+                    font-size: 0.86em;
+                    line-height: 1.1;
+                    white-space: normal;
+                    overflow-wrap: anywhere;
+                    display: inline-block;
                 }
 
                 .admit-simple-address {

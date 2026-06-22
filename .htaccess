@@ -1,31 +1,40 @@
 # School Management System - Apache Configuration
 # Prevent directory browsing
 Options -Indexes
+DirectoryIndex index.php index.html
 
 # Enable URL Rewriting
 RewriteEngine On
 
 # Prevent direct access to sensitive files
-<FilesMatch "\.(sql|env|ini|log)$">
-    Order allow,deny
-    Deny from all
+<FilesMatch "\.(sql|env|ini|log|bak|sqlite|sqlite3)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
 </FilesMatch>
 
-# Block access to config files
-<Files "config.php">
-    Order allow,deny
-    Deny from all
-</Files>
+# Block root config files and common local debug scripts
+<FilesMatch "^(config\.php|database\.php|database\.live\.php|firebase_config\.php)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
 
-# Custom error pages
-ErrorDocument 404 /account3/404.php
-ErrorDocument 403 /account3/403.php
-
-# Set default timezone
-php_value date.timezone "Asia/Kolkata"
-
-# File upload limits
-php_value upload_max_filesize 10M
-php_value post_max_size 10M
-php_value max_execution_time 300
-php_value max_input_time 300
+# Block installation, migration, test, and diagnostic utilities in production
+<FilesMatch "^(setup(?:_.*)?|create_admin|reset_password|fix_.*|check_.*|test_.*|debug_.*|diagnose_database|full_diagnostic|list_receipts|manage_assigned_fees|update_student_batches|add_.*)\.php$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

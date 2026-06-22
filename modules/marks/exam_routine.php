@@ -45,6 +45,20 @@ function examRoutineNormalizeTime($value) {
     return date('H:i:s', $timestamp);
 }
 
+function examRoutineFormatTime12($value) {
+    $value = trim((string) $value);
+    if ($value === '') {
+        return '';
+    }
+
+    $timestamp = strtotime($value);
+    if ($timestamp === false) {
+        return '';
+    }
+
+    return date('h:i A', $timestamp);
+}
+
 function examRoutineLoadSubjects($classId, $selectedSubjectId = 0) {
     $classId = intval($classId);
     $selectedSubjectId = intval($selectedSubjectId);
@@ -335,8 +349,8 @@ if (!$subjectsTableExists || !$examsTableExists || !$classesTableExists) {
 
 $formValues = [
     'exam_date' => $editRoutine['exam_date'] ?? '',
-    'start_time' => substr((string)($editRoutine['start_time'] ?? ''), 0, 5),
-    'end_time' => substr((string)($editRoutine['end_time'] ?? ''), 0, 5),
+    'start_time' => examRoutineFormatTime12($editRoutine['start_time'] ?? ''),
+    'end_time' => examRoutineFormatTime12($editRoutine['end_time'] ?? ''),
     'room_no' => $editRoutine['room_no'] ?? '',
     'notes' => $editRoutine['notes'] ?? '',
     'display_order' => $editRoutine['display_order'] ?? 0,
@@ -345,8 +359,8 @@ $formValues = [
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['add_routine'] ?? $_POST['update_routine'] ?? false)) {
     $formValues['exam_date'] = examRoutineNormalizeDate($_POST['exam_date'] ?? '', $formValues['exam_date']);
-    $formValues['start_time'] = substr(examRoutineNormalizeTime($_POST['start_time'] ?? ''), 0, 5);
-    $formValues['end_time'] = substr(examRoutineNormalizeTime($_POST['end_time'] ?? ''), 0, 5);
+    $formValues['start_time'] = examRoutineFormatTime12(examRoutineNormalizeTime($_POST['start_time'] ?? ''));
+    $formValues['end_time'] = examRoutineFormatTime12(examRoutineNormalizeTime($_POST['end_time'] ?? ''));
     $formValues['room_no'] = trim((string)($_POST['room_no'] ?? ''));
     $formValues['notes'] = trim((string)($_POST['notes'] ?? ''));
     $formValues['display_order'] = intval($_POST['display_order'] ?? $formValues['display_order']);
@@ -486,14 +500,20 @@ include '../../includes/header.php';
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Start Time <span class="text-danger">*</span></label>
-                            <input type="time" name="start_time" class="form-control"
+                            <input type="text" name="start_time" class="form-control"
                                    value="<?php echo htmlspecialchars($formValues['start_time']); ?>"
+                                   placeholder="09:30 AM"
+                                   inputmode="text"
+                                   autocomplete="off"
                                    required>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">End Time <span class="text-danger">*</span></label>
-                            <input type="time" name="end_time" class="form-control"
+                            <input type="text" name="end_time" class="form-control"
                                    value="<?php echo htmlspecialchars($formValues['end_time']); ?>"
+                                   placeholder="12:30 PM"
+                                   inputmode="text"
+                                   autocomplete="off"
                                    required>
                         </div>
                     </div>

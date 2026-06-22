@@ -225,8 +225,8 @@ include '../../includes/header.php';
                         </a>
                     </div>
                     <div class="col-md-3 mb-2">
-                        <a href="<?php echo APP_URL; ?>/modules/students/generate_id_card.php?student_id=<?php echo $studentId; ?>" class="btn btn-secondary w-100" target="_blank">
-                            <i class="bi bi-credit-card"></i> Generate ID Card
+                        <a href="<?php echo APP_URL; ?>/modules/students/generate_id_card.php?student_id=<?php echo $studentId; ?>&mode=single" class="btn btn-secondary w-100" target="_blank">
+                            <i class="bi bi-credit-card"></i> Print ID Card
                         </a>
                     </div>
                     <div class="col-md-3 mb-2">
@@ -320,12 +320,90 @@ include '../../includes/header.php';
 // Get fee summary for this student
 $feeSummary = fetchOne("SELECT
     COALESCE(SUM(fs.amount), 0) as total_fee,
-    COALESCE((SELECT SUM(amount_paid) FROM fee_receipts WHERE student_id = ?), 0) as total_paid
+    COALESCE((SELECT SUM(amount_paid) FROM fee_receipts WHERE student_id = ? AND is_cancelled = 0), 0) as total_paid
     FROM fee_structure fs
     WHERE fs.student_id = ? AND fs.is_active = 1",
     'ii', [$studentId, $studentId]);
 
 $totalDue = $feeSummary['total_fee'] - $feeSummary['total_paid'];
+
+// Build a full paid-record history for this student's profile
+$receiptHistoryColumns = fetchAll("SHOW COLUMNS FROM fee_receipts");
+$receiptHistoryColumnNames = array_column($receiptHistoryColumns, 'Field');
+$receiptDetailColumns = fetchAll("SHOW COLUMNS FROM fee_receipt_details");
+$receiptDetailColumnNames = array_column($receiptDetailColumns, 'Field');
+$hasReceiptBookColumn = in_array('receipt_book_id', $receiptHistoryColumnNames, true);
+$hasReceiptBooksTable = !empty(fetchAll("SHOW TABLES LIKE 'receipt_books'"));
+$hasDiscountColumn = in_array('discount', $receiptDetailColumnNames, true);
+
+$receiptHistorySql = "SELECT
+        fr.receipt_id,
+        fr.receipt_no,
+        fr.payment_date,
+        fr.amount_paid,
+        fr.payment_mode,
+        fr.transaction_id,
+        fr.is_cancelled";
+
+if ($hasReceiptBookColumn && $hasReceiptBooksTable) {
+    $receiptHistorySql .= ",
+        rb.book_name,
+        rb.prefix";
+}
+
+$receiptHistorySql .= "
+    FROM fee_receipts fr";
+
+if ($hasReceiptBookColumn && $hasReceiptBooksTable) {
+    $receiptHistorySql .= "
+    LEFT JOIN receipt_books rb ON fr.receipt_book_id = rb.book_id";
+}
+
+$receiptHistorySql .= "
+    WHERE fr.student_id = ? AND fr.is_cancelled = 0
+    ORDER BY fr.payment_date DESC, fr.receipt_id DESC";
+
+$receiptHistory = fetchAll($receiptHistorySql, 'i', [$studentId]);
+$receiptHistoryDetails = [];
+$receiptHistoryDiscounts = [];
+
+if (!empty($receiptHistory)) {
+    $receiptIds = array_map('intval', array_column($receiptHistory, 'receipt_id'));
+    if (!empty($receiptIds)) {
+        $placeholders = implode(',', array_fill(0, count($receiptIds), '?'));
+        $detailSql = "SELECT
+                frd.receipt_id,
+                frd.amount,
+                frd.fee_month,
+                frd.fee_year,
+                fh.fee_head_name";
+
+        if ($hasDiscountColumn) {
+            $detailSql .= ",
+                COALESCE(frd.discount, 0) AS discount";
+        } else {
+            $detailSql .= ",
+                0 AS discount";
+        }
+
+        $detailSql .= "
+            FROM fee_receipt_details frd
+            JOIN fee_heads fh ON frd.fee_head_id = fh.fee_head_id
+            WHERE frd.receipt_id IN ($placeholders)
+            ORDER BY frd.receipt_id, frd.detail_id";
+
+        $detailRows = fetchAll($detailSql, str_repeat('i', count($receiptIds)), $receiptIds);
+        foreach ($detailRows as $detailRow) {
+            $detailReceiptId = intval($detailRow['receipt_id']);
+            if (!isset($receiptHistoryDetails[$detailReceiptId])) {
+                $receiptHistoryDetails[$detailReceiptId] = [];
+            }
+
+            $receiptHistoryDetails[$detailReceiptId][] = $detailRow;
+            $receiptHistoryDiscounts[$detailReceiptId] = ($receiptHistoryDiscounts[$detailReceiptId] ?? 0) + floatval($detailRow['discount'] ?? 0);
+        }
+    }
+}
 ?>
 
 <div class="row mt-4">
@@ -355,78 +433,102 @@ $totalDue = $feeSummary['total_fee'] - $feeSummary['total_paid'];
     </div>
 </div>
 
-<!-- Recent Receipts -->
-<?php
-$recentReceipts = fetchAll("SELECT fr.*, u.full_name as collected_by_name
-                           FROM fee_receipts fr
-                           LEFT JOIN users u ON fr.collected_by = u.user_id
-                           WHERE fr.student_id = ?
-                           ORDER BY fr.created_at DESC
-                           LIMIT 5",
-                           'i', [$studentId]);
-?>
-
-<?php if (count($recentReceipts) > 0): ?>
+<!-- Paid Records -->
 <div class="row mt-4">
     <div class="col-12">
         <div class="card dashboard-card">
             <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="bi bi-receipt"></i> Recent Fee Receipts</h5>
+                <h5 class="mb-0"><i class="bi bi-receipt"></i> Paid Records</h5>
             </div>
             <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>Receipt No</th>
-                                <th>Date</th>
-                                <th>Amount</th>
-                                <th>Payment Mode</th>
-                                <th>Collected By</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($recentReceipts as $receipt): ?>
-                            <tr>
-                                <td><strong><?php echo htmlspecialchars($receipt['receipt_no']); ?></strong></td>
-                                <td><?php echo formatDate($receipt['payment_date']); ?></td>
-                                <td><strong class="text-success"><?php echo formatCurrency($receipt['amount_paid']); ?></strong></td>
-                                <td>
-                                    <span class="badge bg-<?php
-                                        echo $receipt['payment_mode'] == 'Cash' ? 'success' :
-                                            ($receipt['payment_mode'] == 'UPI' ? 'info' : 'primary');
-                                    ?>">
-                                        <?php echo htmlspecialchars($receipt['payment_mode']); ?>
-                                    </span>
-                                </td>
-                                <td><?php echo htmlspecialchars($receipt['collected_by_name'] ?? '-'); ?></td>
-                                <td>
-                                    <div class="btn-group" role="group">
-                                        <a href="<?php echo APP_URL; ?>/modules/fees/pdf_receipt.php?id=<?php echo $receipt['receipt_id']; ?>"
-                                           class="btn btn-sm btn-danger" target="_blank" title="Download PDF">
-                                            <i class="bi bi-file-pdf"></i>
-                                        </a>
-                                        <a href="<?php echo APP_URL; ?>/modules/fees/receipt.php?id=<?php echo $receipt['receipt_id']; ?>"
-                                           class="btn btn-sm btn-primary" target="_blank" title="Print Receipt">
-                                            <i class="bi bi-printer"></i>
-                                        </a>
-                                    </div>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-                <a href="<?php echo APP_URL; ?>/modules/fees/receipts.php?search=<?php echo urlencode($student['admission_no']); ?>"
-                   class="btn btn-sm btn-outline-primary">
-                    View All Receipts <i class="bi bi-arrow-right"></i>
-                </a>
+                <?php if (!empty($receiptHistory)): ?>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Receipt Book</th>
+                                    <th>Receipt Number</th>
+                                    <th>Receipt Date</th>
+                                    <th>Pay Type</th>
+                                    <th>Cheque No</th>
+                                    <th>Fee Detail</th>
+                                    <th class="text-end">Receipt Amount</th>
+                                    <th class="text-end">Discount Amount</th>
+                                    <th>Status</th>
+                                    <th>Print</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($receiptHistory as $receipt): ?>
+                                    <?php
+                                    $receiptIdForRow = intval($receipt['receipt_id']);
+                                    $feeDetailRows = $receiptHistoryDetails[$receiptIdForRow] ?? [];
+                                    $feeDetailHtml = '';
+
+                                    if (!empty($feeDetailRows)) {
+                                        foreach ($feeDetailRows as $detail) {
+                                            $detailLine = htmlspecialchars($detail['fee_head_name']);
+                                            if (!empty($detail['fee_month'])) {
+                                                $detailLine .= ' (' . htmlspecialchars(trim(($detail['fee_month'] ?? '') . ' ' . ($detail['fee_year'] ?? ''))) . ')';
+                                            }
+                                            $detailLine .= ' - ' . formatCurrency($detail['amount']);
+                                            $feeDetailHtml .= '<div>' . $detailLine . '</div>';
+                                        }
+                                    } else {
+                                        $feeDetailHtml = '<span class="text-muted">N/A</span>';
+                                    }
+
+                                    $receiptBookLabel = 'N/A';
+                                    if ($hasReceiptBookColumn && $hasReceiptBooksTable) {
+                                        if (!empty($receipt['book_name'])) {
+                                            $receiptBookLabel = $receipt['book_name'];
+                                        } elseif (!empty($receipt['prefix'])) {
+                                            $receiptBookLabel = $receipt['prefix'];
+                                        }
+                                    }
+
+                                    $chequeNoLabel = !empty($receipt['transaction_id']) ? $receipt['transaction_id'] : 'N/A';
+                                    $discountAmount = $receiptHistoryDiscounts[$receiptIdForRow] ?? 0;
+                                    $paymentMode = strtolower((string)($receipt['payment_mode'] ?? ''));
+                                    ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($receiptBookLabel); ?></td>
+                                        <td><strong><?php echo htmlspecialchars($receipt['receipt_no']); ?></strong></td>
+                                        <td><?php echo formatDate($receipt['payment_date']); ?></td>
+                                        <td>
+                                            <span class="badge bg-<?php
+                                                echo $paymentMode === 'cash' ? 'success' :
+                                                    ($paymentMode === 'upi' ? 'info' :
+                                                        ($paymentMode === 'bank' ? 'primary' : 'warning'));
+                                            ?>">
+                                                <?php echo htmlspecialchars($receipt['payment_mode']); ?>
+                                            </span>
+                                        </td>
+                                        <td><?php echo htmlspecialchars($chequeNoLabel); ?></td>
+                                        <td><small><?php echo $feeDetailHtml; ?></small></td>
+                                        <td class="text-end"><strong class="text-success"><?php echo formatCurrency($receipt['amount_paid']); ?></strong></td>
+                                        <td class="text-end"><?php echo formatCurrency($discountAmount); ?></td>
+                                        <td><span class="badge bg-success">Paid</span></td>
+                                        <td>
+                                            <a href="<?php echo APP_URL; ?>/modules/fees/receipt.php?id=<?php echo $receiptIdForRow; ?>"
+                                               class="btn btn-sm btn-primary" target="_blank" title="Print Receipt">
+                                                <i class="bi bi-printer"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php else: ?>
+                    <div class="text-center text-muted py-4">
+                        No paid records found for this student.
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
 </div>
-<?php endif; ?>
 
 <?php
 // Include footer

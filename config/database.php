@@ -7,41 +7,46 @@
 // Database credentials
 // Auto-detect environment or use environment variables
 if (!defined('DB_HOST')) {
-    $currentHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $currentHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? '')));
     $isLocalHost = $currentHost === '' || $currentHost === 'localhost' || $currentHost === '127.0.0.1' || str_starts_with($currentHost, 'localhost:') || str_starts_with($currentHost, '127.0.0.1:');
     $liveDatabaseConfigFile = __DIR__ . '/database.live.php';
+    $loadedConfig = null;
 
     if (!$isLocalHost && is_file($liveDatabaseConfigFile)) {
         $liveDatabaseConfig = include $liveDatabaseConfigFile;
 
         if (is_array($liveDatabaseConfig)) {
-            define('DB_HOST', $liveDatabaseConfig['host'] ?? 'localhost');
-            define('DB_USER', $liveDatabaseConfig['user'] ?? 'root');
-            define('DB_PASS', $liveDatabaseConfig['pass'] ?? '');
-            define('DB_NAME', $liveDatabaseConfig['name'] ?? 'school_fees_system');
-            define('DB_CHARSET', $liveDatabaseConfig['charset'] ?? 'utf8mb4');
+            $loadedConfig = $liveDatabaseConfig;
         }
     }
 
-    if (!defined('DB_HOST')) {
-    // Check if we're on InfinityFree or production
-    if (strpos($_SERVER['HTTP_HOST'] ?? '', 'infinityfree') !== false ||
-        strpos($_SERVER['DOCUMENT_ROOT'] ?? '', 'infinityfree') !== false ||
-        getenv('DB_HOST')) {
+    if ($loadedConfig === null) {
+        $envHost = getenv('DB_HOST');
+        if (!empty($envHost)) {
+            $loadedConfig = [
+                'host' => $envHost,
+                'user' => getenv('DB_USER') ?: '',
+                'pass' => getenv('DB_PASS') ?: '',
+                'name' => getenv('DB_NAME') ?: '',
+                'charset' => getenv('DB_CHARSET') ?: 'utf8mb4',
+            ];
+        }
+    }
 
-        // PRODUCTION - Use environment variables or define below
-        define('DB_HOST', getenv('DB_HOST') ?: 'sqlXXX.infinityfree.com'); // Change sqlXXX to your host
-        define('DB_USER', getenv('DB_USER') ?: 'if0_XXXXXXXX');            // Your InfinityFree username
-        define('DB_PASS', getenv('DB_PASS') ?: '');                        // Your database password
-        define('DB_NAME', getenv('DB_NAME') ?: 'if0_XXXXXXXX_school');     // Your database name
-    } else {
-        // DEVELOPMENT - Localhost
+    if ($loadedConfig !== null) {
+        define('DB_HOST', $loadedConfig['host'] ?? 'localhost');
+        define('DB_USER', $loadedConfig['user'] ?? 'root');
+        define('DB_PASS', $loadedConfig['pass'] ?? '');
+        define('DB_NAME', $loadedConfig['name'] ?? 'school_fees_system');
+        define('DB_CHARSET', $loadedConfig['charset'] ?? 'utf8mb4');
+    } elseif ($isLocalHost) {
         define('DB_HOST', 'localhost');
         define('DB_USER', 'root');
         define('DB_PASS', '');
         define('DB_NAME', 'school_fees_system');
-    }
-    define('DB_CHARSET', 'utf8mb4');
+        define('DB_CHARSET', 'utf8mb4');
+    } else {
+        die("Production database configuration is missing. Please upload config/database.live.php or set DB_HOST, DB_USER, DB_PASS, and DB_NAME.");
     }
 }
 
@@ -51,6 +56,8 @@ if (!defined('DB_HOST')) {
  */
 function getDbConnection() {
     static $conn = null;
+    $currentHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? '')));
+    $isLocalHost = $currentHost === '' || $currentHost === 'localhost' || $currentHost === '127.0.0.1' || str_starts_with($currentHost, 'localhost:') || str_starts_with($currentHost, '127.0.0.1:');
 
     if ($conn === null) {
         try {
@@ -62,7 +69,7 @@ function getDbConnection() {
                 error_log("Database Connection Failed: " . $conn->connect_error);
 
                 // Show helpful error message
-                if (strpos($_SERVER['HTTP_HOST'] ?? '', 'localhost') === false) {
+                if (!$isLocalHost) {
                     // Production error - hide details
                     die("Database connection failed. Please check your database credentials in config/database.php");
                 } else {
@@ -81,7 +88,7 @@ function getDbConnection() {
             error_log("Database Error: " . $e->getMessage());
 
             // Show helpful error message based on environment
-            if (strpos($_SERVER['HTTP_HOST'] ?? '', 'localhost') !== false) {
+            if ($isLocalHost) {
                 // Development - show detailed error
                 die("<h3>Database Error</h3>" .
                     "<p><strong>Error:</strong> " . $e->getMessage() . "</p>" .

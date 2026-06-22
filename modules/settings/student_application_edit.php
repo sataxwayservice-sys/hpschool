@@ -191,6 +191,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('The student application could not be found.');
             }
 
+            $targetSchoolId = intval($currentSchoolId);
+            if ($targetSchoolId <= 0) {
+                $targetSchoolId = intval($freshApplication['school_id'] ?? 0);
+            }
+
             $existingDocuments = studentPortalGetApplicationDocuments($freshApplication['documents_json'] ?? '');
             $mergedDocuments = array_merge($existingDocuments, $uploadedDocuments);
             $documentsJson = !empty($mergedDocuments) ? json_encode($mergedDocuments) : null;
@@ -258,7 +263,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $address,
                     $classId,
                     studentApplicationEnsureSectionId($sectionId),
-                    $currentSchoolId,
+                    $targetSchoolId,
                     $photoFilename,
                     $documentsJson,
                     $saveStatus,
@@ -324,6 +329,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 if ($studentId <= 0) {
+                    if ($targetSchoolId > 0) {
+                        $studentLimit = getSchoolStudentAddLimit($targetSchoolId);
+                        $activeStudentCount = getSchoolActiveStudentCount($targetSchoolId);
+                        if ($studentLimit > 0 && $activeStudentCount >= $studentLimit) {
+                            throw new Exception(
+                                'Student admission limit reached for this school (' .
+                                number_format($activeStudentCount) . '/' . number_format($studentLimit) .
+                                '). Please ask Super Admin to increase the limit before approving more students.'
+                            );
+                        }
+                    }
+
                     $admissionNo = getNextAdmissionNumber();
                     $studentResult = executeQuery(
                         "INSERT INTO students (
@@ -334,7 +351,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'Active')",
                         'issssiisssssss',
                         [
-                            $currentSchoolId,
+                            $targetSchoolId,
                             $admissionNo,
                             $studentName,
                             $dateOfBirth,
@@ -381,7 +398,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                          WHERE student_id = ?",
                         'isssiiisssssi',
                         [
-                            $currentSchoolId,
+                            $targetSchoolId,
                             $studentName,
                             $dateOfBirth,
                             $gender,

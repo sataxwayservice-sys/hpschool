@@ -307,13 +307,11 @@ if (!function_exists('marksheetBuildOnePagePdfWrapperHtml')) {
 
 if (!function_exists('marksheetExportOnePagePdfHtml')) {
     function marksheetExportOnePagePdfHtml($html, $downloadName = 'document.pdf', $windowWidth = 1600, $windowHeight = 2200) {
-        $chromePath = pdfExportFindChromePath();
-        if ($chromePath === '') {
-            return [
-                'success' => false,
-                'message' => 'Google Chrome was not found on this server.',
-            ];
+        if (!pdfExportCanUseChrome()) {
+            return pdfExportDownloadHtml($html, $downloadName);
         }
+
+        $chromePath = pdfExportFindChromePath();
 
         $html = (string) $html;
         $trimmedHtml = ltrim($html);
@@ -364,12 +362,7 @@ if (!function_exists('marksheetExportOnePagePdfHtml')) {
         if ($exitCode !== 0 || !file_exists($pngPath) || filesize($pngPath) === 0) {
             @unlink($htmlPath);
             @unlink($pngPath);
-            return [
-                'success' => false,
-                'message' => 'Screenshot capture failed.',
-                'output' => $output,
-                'command' => $command,
-            ];
+            return pdfExportDownloadHtml($html, $downloadName);
         }
 
         $pngBytes = file_get_contents($pngPath);

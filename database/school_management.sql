@@ -76,7 +76,7 @@ CREATE TABLE `school_settings` (
 
 -- Insert default settings
 INSERT INTO `school_settings` (`school_name`, `current_academic_year`, `admission_prefix`, `receipt_prefix`, `upi_id`, `payment_recipient_name`, `payment_note`)
-VALUES ('My School', '2024-2025', 'STU', 'REC', NULL, 'My School', 'School fee payment');
+VALUES ('School Dashboard', '2024-2025', 'STU', 'REC', NULL, 'School Dashboard', 'School fee payment');
 
 -- =====================================================
 -- 3. CLASSES & SECTIONS MASTER

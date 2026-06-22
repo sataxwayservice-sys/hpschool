@@ -211,11 +211,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_rollover'])) {
             $stmt->close();
 
             if ($formCarryStudents) {
-                $stmt = $executeStatement(
-                    "UPDATE students SET batch = ? WHERE status = 'Active'",
-                    's',
-                    [$formNewAcademicYear]
-                );
+                if ($currentSchoolId > 0) {
+                    $stmt = $executeStatement(
+                        "UPDATE students SET batch = ? WHERE status = 'Active' AND school_id = ?",
+                        'si',
+                        [$formNewAcademicYear, $currentSchoolId]
+                    );
+                } else {
+                    $stmt = $executeStatement(
+                        "UPDATE students s
+                         INNER JOIN schools sc ON sc.school_id = s.school_id
+                         SET s.batch = ?
+                         WHERE s.status = 'Active'",
+                        's',
+                        [$formNewAcademicYear]
+                    );
+                }
                 $studentsUpdated = $stmt->affected_rows;
                 $stmt->close();
             }

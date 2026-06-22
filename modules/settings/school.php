@@ -14,6 +14,7 @@ $pageTitle = 'School Settings';
 $currentUser = getCurrentUser();
 $currentSchoolId = getCurrentSchoolId();
 $schoolAccessRole = $currentUser['role'] ?? '';
+$isSuperAdmin = $schoolAccessRole === 'super_admin';
 if ($schoolAccessRole !== 'super_admin') {
     requireRolePermissionForSchool('school_settings', 'view', $currentSchoolId, $schoolAccessRole);
 }
@@ -32,41 +33,91 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $affiliationNo = sanitize($_POST['affiliation_no'] ?? '');
     $schoolCode = sanitize($_POST['school_code'] ?? '');
     $udiseCode = sanitize($_POST['udise_code'] ?? '');
-    $currentAcademicYear = sanitize($_POST['current_academic_year']);
-    $admissionPrefix = sanitize($_POST['admission_prefix']);
-    $receiptPrefix = sanitize($_POST['receipt_prefix']);
+    $currentAcademicYear = sanitize($_POST['current_academic_year'] ?? ($settings['current_academic_year'] ?? date('Y') . '-' . (date('Y') + 1)));
+    $admissionPrefix = sanitize($_POST['admission_prefix'] ?? ($settings['admission_prefix'] ?? 'STU'));
+    $receiptPrefix = sanitize($_POST['receipt_prefix'] ?? ($settings['receipt_prefix'] ?? 'REC'));
+    $attendanceScanMode = sanitize($_POST['attendance_scan_mode'] ?? ($settings['attendance_scan_mode'] ?? 'daily'));
+    if (!in_array($attendanceScanMode, ['daily', 'period'], true)) {
+        $attendanceScanMode = 'daily';
+    }
+    $attendanceClassStartTime = function_exists('attendanceNormalizeTimeValue')
+        ? attendanceNormalizeTimeValue($_POST['attendance_class_start_time'] ?? ($settings['attendance_class_start_time'] ?? '08:00:00'), '08:00:00')
+        : date('H:i:s', strtotime((string)($_POST['attendance_class_start_time'] ?? ($settings['attendance_class_start_time'] ?? '08:00'))));
+    $attendancePeriodDurationMinutes = max(1, intval($_POST['attendance_period_duration_minutes'] ?? ($settings['attendance_period_duration_minutes'] ?? 45)));
+    $attendanceAutoAlertEnabled = isset($_POST['attendance_auto_alert_enabled'])
+        ? 1
+        : intval($settings['attendance_auto_alert_enabled'] ?? 1);
+    $attendanceAbsentMessageTemplate = trim(strip_tags((string)($_POST['attendance_absent_message_template'] ?? ($settings['attendance_absent_message_template'] ?? ''))));
+    if ($attendanceAbsentMessageTemplate === '' && function_exists('attendanceGetDefaultAbsentSmsTemplate')) {
+        $attendanceAbsentMessageTemplate = attendanceGetDefaultAbsentSmsTemplate();
+    }
     $companyName = sanitize($settings['company_name'] ?? '');
     $companyTagline = sanitize($settings['company_tagline'] ?? '');
     $companyAddress = sanitize($settings['company_address'] ?? '');
     $companyPhone = sanitize($settings['company_phone'] ?? '');
     $companyEmail = sanitize($settings['company_email'] ?? '');
     $companyWebsite = sanitize($settings['company_website'] ?? '');
-    $loginBrandSubtitle = sanitize($settings['login_brand_subtitle'] ?? 'School Management System');
-    $loginHeroTitle = sanitize($settings['login_hero_title'] ?? '');
-    $loginHeroSubtitle = sanitize($settings['login_hero_subtitle'] ?? '');
-    $loginPill1 = sanitize($settings['login_pill_1'] ?? '');
-    $loginPill2 = sanitize($settings['login_pill_2'] ?? '');
-    $loginPill3 = sanitize($settings['login_pill_3'] ?? '');
-    $loginMetric1Title = sanitize($settings['login_metric_1_title'] ?? '');
-    $loginMetric1Text = sanitize($settings['login_metric_1_text'] ?? '');
-    $loginMetric2Title = sanitize($settings['login_metric_2_title'] ?? '');
-    $loginMetric2Text = sanitize($settings['login_metric_2_text'] ?? '');
-    $loginMetric3Title = sanitize($settings['login_metric_3_title'] ?? '');
-    $loginMetric3Text = sanitize($settings['login_metric_3_text'] ?? '');
-    $loginCardSubtitle = sanitize($settings['login_card_subtitle'] ?? '');
-    $loginCardTitle = sanitize($settings['login_card_title'] ?? '');
-    $loginUsernameLabel = sanitize($settings['login_username_label'] ?? '');
-    $loginUsernamePlaceholder = sanitize($settings['login_username_placeholder'] ?? '');
-    $loginPasswordLabel = sanitize($settings['login_password_label'] ?? '');
-    $loginPasswordPlaceholder = sanitize($settings['login_password_placeholder'] ?? '');
-    $loginRememberMeLabel = sanitize($settings['login_remember_me_label'] ?? '');
-    $loginButtonText = sanitize($settings['login_button_text'] ?? '');
-    $loginForgotPasswordText = sanitize($settings['login_forgot_password_text'] ?? '');
-    $loginForgotUsernameText = sanitize($settings['login_forgot_username_text'] ?? '');
-    $loginStudentLoginText = sanitize($settings['login_student_login_text'] ?? '');
-    $loginAlertRegisteredText = sanitize($settings['login_alert_registered_text'] ?? '');
-    $loginAlertSchoolRegisteredText = sanitize($settings['login_alert_school_registered_text'] ?? '');
-    $loginAlertResetText = sanitize($settings['login_alert_reset_text'] ?? '');
+    if ($isSuperAdmin) {
+        $loginSettingValue = function (string $key, string $default = '') use ($settings): string {
+            if (array_key_exists($key, $_POST)) {
+                return sanitize((string)($_POST[$key] ?? ''));
+            }
+            return sanitize((string)($settings[$key] ?? $default));
+        };
+        $loginBrandSubtitle = $loginSettingValue('login_brand_subtitle', APP_NAME);
+        $loginHeroTitle = $loginSettingValue('login_hero_title');
+        $loginHeroSubtitle = $loginSettingValue('login_hero_subtitle');
+        $loginPill1 = $loginSettingValue('login_pill_1');
+        $loginPill2 = $loginSettingValue('login_pill_2');
+        $loginPill3 = $loginSettingValue('login_pill_3');
+        $loginMetric1Title = $loginSettingValue('login_metric_1_title');
+        $loginMetric1Text = $loginSettingValue('login_metric_1_text');
+        $loginMetric2Title = $loginSettingValue('login_metric_2_title');
+        $loginMetric2Text = $loginSettingValue('login_metric_2_text');
+        $loginMetric3Title = $loginSettingValue('login_metric_3_title');
+        $loginMetric3Text = $loginSettingValue('login_metric_3_text');
+        $loginCardSubtitle = $loginSettingValue('login_card_subtitle');
+        $loginCardTitle = $loginSettingValue('login_card_title');
+        $loginUsernameLabel = $loginSettingValue('login_username_label');
+        $loginUsernamePlaceholder = $loginSettingValue('login_username_placeholder');
+        $loginPasswordLabel = $loginSettingValue('login_password_label');
+        $loginPasswordPlaceholder = $loginSettingValue('login_password_placeholder');
+        $loginRememberMeLabel = $loginSettingValue('login_remember_me_label');
+        $loginButtonText = $loginSettingValue('login_button_text');
+        $loginForgotPasswordText = $loginSettingValue('login_forgot_password_text');
+        $loginForgotUsernameText = $loginSettingValue('login_forgot_username_text');
+        $loginStudentLoginText = $loginSettingValue('login_student_login_text');
+        $loginAlertRegisteredText = $loginSettingValue('login_alert_registered_text');
+        $loginAlertSchoolRegisteredText = $loginSettingValue('login_alert_school_registered_text');
+        $loginAlertResetText = $loginSettingValue('login_alert_reset_text');
+    } else {
+        $loginBrandSubtitle = trim((string)($settings['login_brand_subtitle'] ?? APP_NAME));
+        $loginHeroTitle = trim((string)($settings['login_hero_title'] ?? ''));
+        $loginHeroSubtitle = trim((string)($settings['login_hero_subtitle'] ?? ''));
+        $loginPill1 = trim((string)($settings['login_pill_1'] ?? ''));
+        $loginPill2 = trim((string)($settings['login_pill_2'] ?? ''));
+        $loginPill3 = trim((string)($settings['login_pill_3'] ?? ''));
+        $loginMetric1Title = trim((string)($settings['login_metric_1_title'] ?? ''));
+        $loginMetric1Text = trim((string)($settings['login_metric_1_text'] ?? ''));
+        $loginMetric2Title = trim((string)($settings['login_metric_2_title'] ?? ''));
+        $loginMetric2Text = trim((string)($settings['login_metric_2_text'] ?? ''));
+        $loginMetric3Title = trim((string)($settings['login_metric_3_title'] ?? ''));
+        $loginMetric3Text = trim((string)($settings['login_metric_3_text'] ?? ''));
+        $loginCardSubtitle = trim((string)($settings['login_card_subtitle'] ?? ''));
+        $loginCardTitle = trim((string)($settings['login_card_title'] ?? ''));
+        $loginUsernameLabel = trim((string)($settings['login_username_label'] ?? ''));
+        $loginUsernamePlaceholder = trim((string)($settings['login_username_placeholder'] ?? ''));
+        $loginPasswordLabel = trim((string)($settings['login_password_label'] ?? ''));
+        $loginPasswordPlaceholder = trim((string)($settings['login_password_placeholder'] ?? ''));
+        $loginRememberMeLabel = trim((string)($settings['login_remember_me_label'] ?? ''));
+        $loginButtonText = trim((string)($settings['login_button_text'] ?? ''));
+        $loginForgotPasswordText = trim((string)($settings['login_forgot_password_text'] ?? ''));
+        $loginForgotUsernameText = trim((string)($settings['login_forgot_username_text'] ?? ''));
+        $loginStudentLoginText = trim((string)($settings['login_student_login_text'] ?? ''));
+        $loginAlertRegisteredText = trim((string)($settings['login_alert_registered_text'] ?? ''));
+        $loginAlertSchoolRegisteredText = trim((string)($settings['login_alert_school_registered_text'] ?? ''));
+        $loginAlertResetText = trim((string)($settings['login_alert_reset_text'] ?? ''));
+    }
 
     // Handle theme colors
     $themePreset = sanitize($_POST['theme_preset'] ?? 'default');
@@ -129,6 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     school_name = ?, school_address = ?, school_phone = ?,
                     school_email = ?, affiliation_no = ?, school_code = ?, udise_code = ?, current_academic_year = ?,
                     admission_prefix = ?, receipt_prefix = ?,
+                    attendance_scan_mode = ?, attendance_class_start_time = ?, attendance_period_duration_minutes = ?, attendance_auto_alert_enabled = ?, attendance_absent_message_template = ?,
                     school_logo = ?, login_logo = ?, banner_logo = ?, company_name = ?, company_tagline = ?,
                     company_address = ?, company_phone = ?, company_email = ?, company_website = ?, company_logo = ?,
                     login_brand_subtitle = ?, login_hero_title = ?, login_hero_subtitle = ?,
@@ -153,6 +205,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $schoolName, $schoolAddress, $schoolPhone,
         $schoolEmail, $affiliationNo, $schoolCode, $udiseCode, $currentAcademicYear,
         $admissionPrefix, $receiptPrefix,
+        $attendanceScanMode, $attendanceClassStartTime, $attendancePeriodDurationMinutes, $attendanceAutoAlertEnabled, $attendanceAbsentMessageTemplate,
         $schoolLogo, $loginLogo, $bannerLogo, $companyName, $companyTagline,
         $companyAddress, $companyPhone, $companyEmail, $companyWebsite, $companyLogo,
         $loginBrandSubtitle, $loginHeroTitle, $loginHeroSubtitle,
@@ -191,6 +244,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'current_academic_year' => $currentAcademicYear,
             'admission_prefix' => $admissionPrefix,
             'receipt_prefix' => $receiptPrefix,
+            'attendance_scan_mode' => $attendanceScanMode,
+            'attendance_class_start_time' => $attendanceClassStartTime,
+            'attendance_period_duration_minutes' => $attendancePeriodDurationMinutes,
+            'attendance_auto_alert_enabled' => $attendanceAutoAlertEnabled,
+            'attendance_absent_message_template' => $attendanceAbsentMessageTemplate,
             'school_logo' => $schoolLogo,
             'login_logo' => $loginLogo,
             'banner_logo' => $bannerLogo,
@@ -327,6 +385,7 @@ include '../../includes/header.php';
                         </div>
                     </div>
 
+                    <?php if (!$isSuperAdmin): ?>
                     <!-- Academic Settings -->
                     <h5 class="mb-3"><i class="bi bi-calendar-check"></i> Academic Settings</h5>
 
@@ -350,6 +409,53 @@ include '../../includes/header.php';
                                    placeholder="REC" required maxlength="10">
                         </div>
                     </div>
+
+                    <!-- Attendance Scan Control -->
+                    <h5 class="mb-3"><i class="bi bi-qr-code-scan"></i> Attendance Scan Control</h5>
+
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        Choose whether attendance is tracked once per day or by class period. When period mode is active, each scan creates a separate attendance record and absent alerts can be sent for every class.
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="attendance_scan_mode" class="form-label required">Scan Mode</label>
+                            <select class="form-select" id="attendance_scan_mode" name="attendance_scan_mode">
+                                <option value="daily" <?php echo (($settings['attendance_scan_mode'] ?? 'daily') === 'daily') ? 'selected' : ''; ?>>One-time per day</option>
+                                <option value="period" <?php echo (($settings['attendance_scan_mode'] ?? 'daily') === 'period') ? 'selected' : ''; ?>>Every class / period</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="attendance_class_start_time" class="form-label required">Class Start Time</label>
+                            <input type="time" class="form-control" id="attendance_class_start_time" name="attendance_class_start_time"
+                                   value="<?php echo htmlspecialchars(substr(function_exists('attendanceNormalizeTimeValue') ? attendanceNormalizeTimeValue($settings['attendance_class_start_time'] ?? '08:00:00', '08:00:00') : ($settings['attendance_class_start_time'] ?? '08:00:00'), 0, 5)); ?>">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="attendance_period_duration_minutes" class="form-label required">Period Duration (Minutes)</label>
+                            <input type="number" class="form-control" id="attendance_period_duration_minutes" name="attendance_period_duration_minutes"
+                                   min="1" max="240"
+                                   value="<?php echo intval($settings['attendance_period_duration_minutes'] ?? 45); ?>">
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="attendance_auto_alert_enabled" name="attendance_auto_alert_enabled"
+                               <?php echo !empty($settings['attendance_auto_alert_enabled']) ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="attendance_auto_alert_enabled">
+                            Enable auto absent alert SMS
+                        </label>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="attendance_absent_message_template" class="form-label">Auto Absent Message Template</label>
+                        <textarea class="form-control" id="attendance_absent_message_template" name="attendance_absent_message_template" rows="4"
+                                  placeholder="Dear Parent, {student_details} was marked ABSENT {period_text} on {date} at {school_name}. Please contact the school office if this needs correction."><?php echo htmlspecialchars($settings['attendance_absent_message_template'] ?? (function_exists('attendanceGetDefaultAbsentSmsTemplate') ? attendanceGetDefaultAbsentSmsTemplate() : '')); ?></textarea>
+                        <small class="text-muted d-block mt-2">
+                            Available placeholders: {student_name}, {admission_no}, {roll_no}, {father_name}, {class_name}, {section_name}, {class_display}, {student_details}, {date}, {date_iso}, {period_text}, {period_label}, {period_start}, {period_end}, {school_name}
+                        </small>
+                    </div>
+                    <?php endif; ?>
 
                     <hr>
 
@@ -403,6 +509,177 @@ include '../../includes/header.php';
                         </div>
 
                     </div>
+
+                    <?php if ($isSuperAdmin): ?>
+                    <hr>
+
+                    <!-- Staff Login Page Text -->
+                    <h5 class="mb-3" id="login-page-text"><i class="bi bi-box-arrow-in-right"></i> Staff Login Page Text</h5>
+
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i>
+                            <strong>Super Admin control:</strong> These settings update the staff login page shown on <?php echo APP_NAME; ?>.
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="login_brand_subtitle" class="form-label">Brand Subtitle</label>
+                                <input type="text" class="form-control" id="login_brand_subtitle" name="login_brand_subtitle"
+                                       value="<?php echo htmlspecialchars($settings['login_brand_subtitle'] ?? APP_NAME); ?>"
+                                       placeholder="<?php echo htmlspecialchars(APP_NAME); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_card_subtitle" class="form-label">Card Subtitle</label>
+                                <input type="text" class="form-control" id="login_card_subtitle" name="login_card_subtitle"
+                                       value="<?php echo htmlspecialchars($settings['login_card_subtitle'] ?? 'Staff Login'); ?>"
+                                       placeholder="Staff Login">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_card_title" class="form-label">Card Title</label>
+                                <input type="text" class="form-control" id="login_card_title" name="login_card_title"
+                                       value="<?php echo htmlspecialchars($settings['login_card_title'] ?? 'Login to Your Account'); ?>"
+                                       placeholder="Login to Your Account">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="login_hero_title" class="form-label">Hero Title</label>
+                            <input type="text" class="form-control" id="login_hero_title" name="login_hero_title"
+                                   value="<?php echo htmlspecialchars($settings['login_hero_title'] ?? 'Secure access for staff, records, and school operations.'); ?>"
+                                   placeholder="Secure access for staff, records, and school operations.">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="login_hero_subtitle" class="form-label">Hero Subtitle</label>
+                            <textarea class="form-control" id="login_hero_subtitle" name="login_hero_subtitle" rows="3"
+                                      placeholder="Sign in to manage admissions, fees, reports, marks, documents, and daily workflows."><?php echo htmlspecialchars($settings['login_hero_subtitle'] ?? ''); ?></textarea>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="login_pill_1" class="form-label">Pill Text 1</label>
+                                <input type="text" class="form-control" id="login_pill_1" name="login_pill_1"
+                                       value="<?php echo htmlspecialchars($settings['login_pill_1'] ?? 'Role-based access'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_pill_2" class="form-label">Pill Text 2</label>
+                                <input type="text" class="form-control" id="login_pill_2" name="login_pill_2"
+                                       value="<?php echo htmlspecialchars($settings['login_pill_2'] ?? 'Reports and receipts'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_pill_3" class="form-label">Pill Text 3</label>
+                                <input type="text" class="form-control" id="login_pill_3" name="login_pill_3"
+                                       value="<?php echo htmlspecialchars($settings['login_pill_3'] ?? 'Student management'); ?>">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="login_metric_1_title" class="form-label">Metric 1 Title</label>
+                                <input type="text" class="form-control" id="login_metric_1_title" name="login_metric_1_title"
+                                       value="<?php echo htmlspecialchars($settings['login_metric_1_title'] ?? 'Secure'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_metric_2_title" class="form-label">Metric 2 Title</label>
+                                <input type="text" class="form-control" id="login_metric_2_title" name="login_metric_2_title"
+                                       value="<?php echo htmlspecialchars($settings['login_metric_2_title'] ?? 'Fast'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_metric_3_title" class="form-label">Metric 3 Title</label>
+                                <input type="text" class="form-control" id="login_metric_3_title" name="login_metric_3_title"
+                                       value="<?php echo htmlspecialchars($settings['login_metric_3_title'] ?? 'Reliable'); ?>">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="login_metric_1_text" class="form-label">Metric 1 Text</label>
+                                <input type="text" class="form-control" id="login_metric_1_text" name="login_metric_1_text"
+                                       value="<?php echo htmlspecialchars($settings['login_metric_1_text'] ?? 'Controlled by user role'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_metric_2_text" class="form-label">Metric 2 Text</label>
+                                <input type="text" class="form-control" id="login_metric_2_text" name="login_metric_2_text"
+                                       value="<?php echo htmlspecialchars($settings['login_metric_2_text'] ?? 'Quick access on any device'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_metric_3_text" class="form-label">Metric 3 Text</label>
+                                <input type="text" class="form-control" id="login_metric_3_text" name="login_metric_3_text"
+                                       value="<?php echo htmlspecialchars($settings['login_metric_3_text'] ?? 'Daily school operations ready'); ?>">
+                            </div>
+                        </div>
+
+                        <h6 class="mb-3 mt-4"><i class="bi bi-ui-checks-grid"></i> Form Labels & Helper Text</h6>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="login_username_label" class="form-label">Username Label</label>
+                                <input type="text" class="form-control" id="login_username_label" name="login_username_label"
+                                       value="<?php echo htmlspecialchars($settings['login_username_label'] ?? 'Username or Email'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_username_placeholder" class="form-label">Username Placeholder</label>
+                                <input type="text" class="form-control" id="login_username_placeholder" name="login_username_placeholder"
+                                       value="<?php echo htmlspecialchars($settings['login_username_placeholder'] ?? 'Enter username or email'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_password_label" class="form-label">Password Label</label>
+                                <input type="text" class="form-control" id="login_password_label" name="login_password_label"
+                                       value="<?php echo htmlspecialchars($settings['login_password_label'] ?? 'Password'); ?>">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="login_password_placeholder" class="form-label">Password Placeholder</label>
+                                <input type="text" class="form-control" id="login_password_placeholder" name="login_password_placeholder"
+                                       value="<?php echo htmlspecialchars($settings['login_password_placeholder'] ?? 'Enter password'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_remember_me_label" class="form-label">Remember Me Label</label>
+                                <input type="text" class="form-control" id="login_remember_me_label" name="login_remember_me_label"
+                                       value="<?php echo htmlspecialchars($settings['login_remember_me_label'] ?? 'Remember me'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_button_text" class="form-label">Login Button Text</label>
+                                <input type="text" class="form-control" id="login_button_text" name="login_button_text"
+                                       value="<?php echo htmlspecialchars($settings['login_button_text'] ?? 'Login'); ?>">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="login_forgot_password_text" class="form-label">Forgot Password Text</label>
+                                <input type="text" class="form-control" id="login_forgot_password_text" name="login_forgot_password_text"
+                                       value="<?php echo htmlspecialchars($settings['login_forgot_password_text'] ?? 'Forgot Password?'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_forgot_username_text" class="form-label">Forgot Username Text</label>
+                                <input type="text" class="form-control" id="login_forgot_username_text" name="login_forgot_username_text"
+                                       value="<?php echo htmlspecialchars($settings['login_forgot_username_text'] ?? 'Forgot Username?'); ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="login_student_login_text" class="form-label">Student Login Text</label>
+                                <input type="text" class="form-control" id="login_student_login_text" name="login_student_login_text"
+                                       value="<?php echo htmlspecialchars($settings['login_student_login_text'] ?? 'Student Login'); ?>">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="login_alert_registered_text" class="form-label">Account Registered Alert</label>
+                            <textarea class="form-control" id="login_alert_registered_text" name="login_alert_registered_text" rows="2"><?php echo htmlspecialchars($settings['login_alert_registered_text'] ?? 'Your account has been created. Please login with your new credentials.'); ?></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="login_alert_school_registered_text" class="form-label">School Registration Alert</label>
+                            <textarea class="form-control" id="login_alert_school_registered_text" name="login_alert_school_registered_text" rows="2"><?php echo htmlspecialchars($settings['login_alert_school_registered_text'] ?? 'School registration submitted. Waiting for Super Admin approval.'); ?></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="login_alert_reset_text" class="form-label">Password Reset Alert</label>
+                            <textarea class="form-control" id="login_alert_reset_text" name="login_alert_reset_text" rows="2"><?php echo htmlspecialchars($settings['login_alert_reset_text'] ?? 'Password updated successfully. You can now login with the new password.'); ?></textarea>
+                        </div>
+                    <?php endif; ?>
 
                     <hr>
 

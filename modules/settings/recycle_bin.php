@@ -15,6 +15,10 @@ $success = '';
 
 $conn = getDbConnection();
 
+if (function_exists('ensureFeeModuleSchema')) {
+    ensureFeeModuleSchema();
+}
+
 // Create deleted_items table if not exists
 $createTable = "CREATE TABLE IF NOT EXISTS deleted_items (
     deleted_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -46,6 +50,19 @@ if (isset($_POST['restore_item'])) {
             // Restore based on type
             switch ($itemType) {
                 case 'student':
+                    $restoreSchoolId = intval($itemData['school_id'] ?? 0);
+                    if ($restoreSchoolId > 0) {
+                        $studentLimit = getSchoolStudentAddLimit($restoreSchoolId);
+                        $activeStudentCount = getSchoolActiveStudentCount($restoreSchoolId);
+                        if ($studentLimit > 0 && $activeStudentCount >= $studentLimit) {
+                            throw new Exception(
+                                'Student admission limit reached for this school (' .
+                                number_format($activeStudentCount) . '/' . number_format($studentLimit) .
+                                '). Increase the limit from Super Admin before restoring more students.'
+                            );
+                        }
+                    }
+
                     // Restore student
                     $query = "INSERT INTO students (student_id, admission_no, student_name, class_id, section_id, status, batch, guardian_name, contact_phone, email, address, date_of_birth, gender, religion, category, admission_date, created_at)
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
@@ -127,22 +144,52 @@ if (isset($_POST['restore_item'])) {
 
                 case 'fee_assignment':
                     // Restore fee assignment
-                    $query = "INSERT INTO fee_structure (structure_id, student_id, fee_head_id, amount, effective_from, is_active, created_at)
-                              VALUES (?, ?, ?, ?, ?, 1, ?)";
-                    executeQuery($query, 'iiidss', [
+                    $hasSchoolId = array_key_exists('school_id', $itemData);
+                    $query = "INSERT INTO fee_structure (structure_id, student_id, fee_head_id, amount, effective_from, is_active, created_at";
+                    $types = 'iiidss';
+                    $values = [
                         $itemData['structure_id'], $itemData['student_id'], $itemData['fee_head_id'],
                         $itemData['amount'], $itemData['effective_from'], $itemData['created_at'] ?? date('Y-m-d H:i:s')
-                    ]);
+                    ];
+
+                    if ($hasSchoolId) {
+                        $query .= ", school_id";
+                        $types .= 'i';
+                        $values[] = intval($itemData['school_id']);
+                    }
+
+                    $query .= ") VALUES (?, ?, ?, ?, ?, 1, ?";
+                    if ($hasSchoolId) {
+                        $query .= ", ?";
+                    }
+                    $query .= ")";
+
+                    executeQuery($query, $types, $values);
                     break;
 
                 case 'fee_head':
                     // Restore fee head
-                    $query = "INSERT INTO fee_heads (fee_head_id, fee_head_name, fee_type, display_order, is_active, created_at)
-                              VALUES (?, ?, ?, ?, 1, ?)";
-                    executeQuery($query, 'issis', [
+                    $hasSchoolId = array_key_exists('school_id', $itemData);
+                    $query = "INSERT INTO fee_heads (fee_head_id, fee_head_name, fee_type, display_order, is_active, created_at";
+                    $types = 'issis';
+                    $values = [
                         $itemData['fee_head_id'], $itemData['fee_head_name'], $itemData['fee_type'],
                         $itemData['display_order'], $itemData['created_at'] ?? date('Y-m-d H:i:s')
-                    ]);
+                    ];
+
+                    if ($hasSchoolId) {
+                        $query .= ", school_id";
+                        $types .= 'i';
+                        $values[] = intval($itemData['school_id']);
+                    }
+
+                    $query .= ") VALUES (?, ?, ?, ?, 1, ?";
+                    if ($hasSchoolId) {
+                        $query .= ", ?";
+                    }
+                    $query .= ")";
+
+                    executeQuery($query, $types, $values);
                     break;
 
                 case 'fee_receipt_permanent':

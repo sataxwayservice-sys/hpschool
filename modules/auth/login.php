@@ -7,8 +7,32 @@
 // Include configuration (handles session start)
 require_once '../../config/config.php';
 
+$redirectTarget = trim((string)($_GET['redirect'] ?? $_POST['redirect'] ?? ''));
+$redirectTarget = preg_replace('/[\r\n]+/', '', $redirectTarget);
+
+if ($redirectTarget !== '') {
+    $parsedRedirect = parse_url($redirectTarget);
+    $redirectPath = trim((string)($parsedRedirect['path'] ?? ''));
+    $appPath = rtrim((string)(parse_url(APP_URL, PHP_URL_PATH) ?? ''), '/');
+    if ($appPath !== '' && strpos($redirectPath, $appPath) === 0) {
+        $redirectPath = substr($redirectPath, strlen($appPath));
+    }
+    $redirectPath = '/' . ltrim($redirectPath, '/');
+    if ($redirectPath === '' || strpos($redirectPath, '//') === 0) {
+        $redirectTarget = '';
+    } else {
+        $redirectTarget = $redirectPath;
+        if (!empty($parsedRedirect['query'])) {
+            $redirectTarget .= '?' . $parsedRedirect['query'];
+        }
+    }
+}
+
 // Redirect if already logged in
 if (isLoggedIn()) {
+    if ($redirectTarget !== '') {
+        redirect(APP_URL . $redirectTarget);
+    }
     redirect(getUserHomeUrl());
 }
 
@@ -23,6 +47,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $result = loginUser($username, $password);
 
     if ($result['success']) {
+        if ($redirectTarget !== '') {
+            redirect(APP_URL . $redirectTarget);
+        }
         redirect(getUserHomeUrl($result['user'] ?? null));
     } else {
         $error = $result['message'];
@@ -36,7 +63,7 @@ $loginText = function (string $key, string $default) use ($schoolSettings): stri
     return $value !== '' ? $value : $default;
 };
 
-$loginBrandSubtitle = $loginText('login_brand_subtitle', 'School Management System');
+$loginBrandSubtitle = $loginText('login_brand_subtitle', APP_NAME);
 $loginHeroTitle = $loginText('login_hero_title', 'Secure access for staff, records, and school operations.');
 $loginHeroSubtitle = $loginText('login_hero_subtitle', 'Sign in to manage admissions, fees, reports, marks, documents, and daily workflows from one premium school ERP interface.');
 $loginPill1 = $loginText('login_pill_1', 'Role-based access');
@@ -167,6 +194,9 @@ $loginAlertResetText = $loginText('login_alert_reset_text', 'Password updated su
                 <?php endif; ?>
 
                 <form method="POST" action="" class="needs-validation" novalidate>
+                    <?php if ($redirectTarget !== ''): ?>
+                        <input type="hidden" name="redirect" value="<?php echo htmlspecialchars($redirectTarget); ?>">
+                    <?php endif; ?>
                     <div class="mb-3">
                         <label for="username" class="form-label">
                             <i class="bi bi-person"></i> <?php echo htmlspecialchars($loginUsernameLabel); ?>

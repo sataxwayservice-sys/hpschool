@@ -13,22 +13,48 @@ requirePermission('settings', 'edit');
 
 $pageTitle = 'Fee Heads Management';
 $currentUser = getCurrentUser();
+$currentSchoolId = function_exists('getCurrentSchoolId') ? intval(getCurrentSchoolId()) : 0;
+
+if (function_exists('ensureFeeModuleSchema')) {
+    ensureFeeModuleSchema();
+}
 
 // Handle delete
 if (isset($_GET['delete']) && hasPermission('settings', 'delete')) {
     $feeHeadId = intval($_GET['delete']);
 
     // Check if fee head is used in fee structure (only active assignments)
-    $usageCount = fetchOne("SELECT COUNT(*) as count FROM fee_structure WHERE fee_head_id = ? AND is_active = 1", 'i', [$feeHeadId]);
+    $usageCountQuery = "SELECT COUNT(*) as count FROM fee_structure WHERE fee_head_id = ? AND is_active = 1";
+    $usageCountParams = [$feeHeadId];
+    $usageCountTypes = 'i';
+
+    if ($currentSchoolId > 0) {
+        $usageCountQuery .= " AND COALESCE(school_id, 0) = ?";
+        $usageCountParams[] = $currentSchoolId;
+        $usageCountTypes .= 'i';
+    }
+
+    $usageCount = fetchOne($usageCountQuery, $usageCountTypes, $usageCountParams);
 
     if ($usageCount['count'] > 0) {
         $_SESSION['error_message'] = "Cannot delete fee head. It is assigned to {$usageCount['count']} student(s).";
     } else {
         // Check if fee head has been used in any ACTIVE (non-cancelled) receipts
-        $receiptCount = fetchOne("SELECT COUNT(*) as count
-                                  FROM fee_receipt_details frd
-                                  JOIN fee_receipts fr ON frd.receipt_id = fr.receipt_id
-                                  WHERE frd.fee_head_id = ? AND fr.is_cancelled = 0", 'i', [$feeHeadId]);
+        $receiptCountQuery = "SELECT COUNT(*) as count
+                              FROM fee_receipt_details frd
+                              JOIN fee_receipts fr ON frd.receipt_id = fr.receipt_id
+                              JOIN students s ON fr.student_id = s.student_id
+                              WHERE frd.fee_head_id = ? AND fr.is_cancelled = 0";
+        $receiptCountParams = [$feeHeadId];
+        $receiptCountTypes = 'i';
+
+        if ($currentSchoolId > 0) {
+            $receiptCountQuery .= " AND COALESCE(s.school_id, 0) = ?";
+            $receiptCountParams[] = $currentSchoolId;
+            $receiptCountTypes .= 'i';
+        }
+
+        $receiptCount = fetchOne($receiptCountQuery, $receiptCountTypes, $receiptCountParams);
 
         if ($receiptCount['count'] > 0) {
             $_SESSION['error_message'] = "Cannot delete fee head. It has been used in {$receiptCount['count']} active receipt(s). Deleting it would corrupt financial records.";
@@ -64,9 +90,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($feeHeadId > 0) {
             // Update
             $query = "UPDATE fee_heads
-                     SET fee_head_name = ?, fee_type = ?, display_order = ?, is_active = ?
-                     WHERE fee_head_id = ?";
-            if (executeQuery($query, 'ssiii', [$feeHeadName, $feeType, $displayOrder, $isActive, $feeHeadId])) {
+                     SET fee_head_name = ?, fee_type = ?, display_order = ?, is_active = ?";
+            $types = 'ssii';
+            $params = [$feeHeadName, $feeType, $displayOrder, $isActive];
+
+            if ($currentSchoolId > 0) {
+                $query .= ", school_id = ?";
+                $types .= 'i';
+                $params[] = $currentSchoolId;
+            }
+
+            $query .= " WHERE fee_head_id = ?";
+            $types .= 'i';
+            $params[] = $feeHeadId;
+
+            if (executeQuery($query, $types, $params)) {
                 logActivity($currentUser['user_id'], 'Fee Head Updated', 'settings', "Updated fee head: $feeHeadName");
                 $_SESSION['success_message'] = "Fee head updated successfully!";
             } else {
@@ -74,9 +112,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } else {
             // Insert
-            $query = "INSERT INTO fee_heads (fee_head_name, fee_type, display_order, is_active)
-                     VALUES (?, ?, ?, ?)";
-            if (executeQuery($query, 'ssii', [$feeHeadName, $feeType, $displayOrder, $isActive])) {
+            $query = "INSERT INTO fee_heads (fee_head_name, fee_type, display_order, is_active";
+            $types = 'ssii';
+            $params = [$feeHeadName, $feeType, $displayOrder, $isActive];
+
+            if ($currentSchoolId > 0) {
+                $query .= ", school_id";
+                $types .= 'i';
+                $params[] = $currentSchoolId;
+            }
+
+            $query .= ") VALUES (?, ?, ?, ?";
+            if ($currentSchoolId > 0) {
+                $query .= ", ?";
+            }
+            $query .= ")";
+
+            if (executeQuery($query, $types, $params)) {
                 logActivity($currentUser['user_id'], 'Fee Head Added', 'settings', "Added new fee head: $feeHeadName");
                 $_SESSION['success_message'] = "Fee head added successfully!";
             } else {
@@ -89,13 +141,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Get all fee heads with usage count
-$feeHeads = fetchAll("SELECT fh.*,
-                     COUNT(DISTINCT fs.student_id) as student_count,
-                     COALESCE(SUM(fs.amount), 0) as total_amount
-                     FROM fee_heads fh
-                     LEFT JOIN fee_structure fs ON fh.fee_head_id = fs.fee_head_id AND fs.is_active = 1
-                     GROUP BY fh.fee_head_id
-                     ORDER BY fh.display_order");
+$feeHeadsQuery = "SELECT fh.*,
+                  COUNT(DISTINCT fs.student_id) as student_count,
+                  COALESCE(SUM(fs.amount), 0) as total_amount
+                  FROM fee_heads fh
+                  LEFT JOIN fee_structure fs ON fh.fee_head_id = fs.fee_head_id AND fs.is_active = 1";
+$feeHeadsParams = [];
+$feeHeadsTypes = '';
+if ($currentSchoolId > 0) {
+    $feeHeadsQuery .= " AND COALESCE(fs.school_id, 0) = ?";
+    $feeHeadsParams[] = $currentSchoolId;
+    $feeHeadsTypes .= 'i';
+}
+
+$feeHeadsQuery .= " WHERE 1=1";
+if ($currentSchoolId > 0) {
+    $feeHeadsQuery .= " AND COALESCE(fh.school_id, 0) = ?";
+    $feeHeadsParams[] = $currentSchoolId;
+    $feeHeadsTypes .= 'i';
+}
+
+$feeHeadsQuery .= " GROUP BY fh.fee_head_id
+                    ORDER BY fh.display_order";
+
+$feeHeads = empty($feeHeadsTypes) ? fetchAll($feeHeadsQuery) : fetchAll($feeHeadsQuery, $feeHeadsTypes, $feeHeadsParams);
 
 // Include header
 include '../../includes/header.php';

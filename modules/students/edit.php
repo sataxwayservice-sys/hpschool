@@ -50,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $contactNo = sanitize($_POST['contact_no']);
     $email = sanitize($_POST['email'] ?? '');
     $status = sanitize($_POST['status']);
+    $attendanceAutoAlertDisabled = isset($_POST['attendance_auto_alert_disabled']) ? 1 : 0;
 
     // Handle photo upload (Passport size: 35mm x 45mm = 350px x 450px)
     $photoFilename = $student['photo']; // Keep existing photo by default
@@ -71,14 +72,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     student_name = ?, date_of_birth = ?, gender = ?,
                     class_id = ?, section_id = ?, roll_no = ?, address = ?,
                     father_name = ?, mother_name = ?, contact_no = ?, email = ?,
-                    photo = ?, status = ?, updated_at = NOW()
+                    photo = ?, status = ?, attendance_auto_alert_disabled = ?, updated_at = NOW()
                     WHERE student_id = ?";
 
-    $result = executeQuery($updateQuery, 'sssiiisssssssi', [
+    $result = executeQuery($updateQuery, str_repeat('s', 15), [
         $studentName, $dateOfBirth, $gender,
         $classId, $sectionId, $rollNo, $address,
         $fatherName, $motherName, $contactNo, $email,
-        $photoFilename, $status, $studentId
+        $photoFilename, $status, $attendanceAutoAlertDisabled, $studentId
     ]);
 
     if ($result !== false) {
@@ -246,6 +247,14 @@ include '../../includes/header.php';
                             <input type="email" class="form-control" id="email" name="email"
                                    value="<?php echo htmlspecialchars($student['email']); ?>">
                         </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="attendance_auto_alert_disabled" name="attendance_auto_alert_disabled"
+                               <?php echo !empty($student['attendance_auto_alert_disabled']) ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="attendance_auto_alert_disabled">
+                            Disable automatic absent SMS for this student
+                        </label>
                     </div>
 
                     <!-- Status -->

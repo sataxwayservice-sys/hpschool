@@ -27,11 +27,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_reminder'])) {
               VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
 
     if ($dueDate) {
-        executeQuery($query, 'issssiss', [$studentId, $reminderText, $reminderType, $priority, $dueDate, $currentUser['user_id'], $currentUser['role']]);
+        executeQuery($query, 'issssis', [$studentId, $reminderText, $reminderType, $priority, $dueDate, $currentUser['user_id'], $currentUser['role']]);
     } else {
         $query = "INSERT INTO student_reminders (student_id, reminder_text, reminder_type, priority, created_by, created_by_role, created_at)
                   VALUES (?, ?, ?, ?, ?, ?, NOW())";
-        executeQuery($query, 'isssiss', [$studentId, $reminderText, $reminderType, $priority, $currentUser['user_id'], $currentUser['role']]);
+        executeQuery($query, 'isssis', [$studentId, $reminderText, $reminderType, $priority, $currentUser['user_id'], $currentUser['role']]);
     }
 
     logActivity($currentUser['user_id'], 'Reminder Added', 'Students', "Added reminder for student ID: $studentId");
@@ -65,7 +65,7 @@ if (isset($_GET['resolve']) && !empty($_GET['resolve'])) {
     $reminderId = intval($_GET['resolve']);
 
     $query = "UPDATE student_reminders
-              SET status = 'Resolved', resolved_at = NOW(), resolved_by = ?
+              SET status = 'Resolved', is_resolved = 1, resolved_at = NOW(), resolved_by = ?
               WHERE reminder_id = ?";
     executeQuery($query, 'ii', [$currentUser['user_id'], $reminderId]);
 

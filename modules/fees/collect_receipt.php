@@ -13,15 +13,25 @@ requirePermission('fees', 'add');
 
 $pageTitle = 'Fee Receipt';
 $currentUser = getCurrentUser();
+$currentSchoolId = function_exists('getCurrentSchoolId') ? intval(getCurrentSchoolId()) : 0;
 $error = '';
 $success = '';
+
+if (function_exists('ensureFeeModuleSchema')) {
+    ensureFeeModuleSchema();
+}
 
 // Get student if ID provided
 $student = null;
 $studentId = isset($_GET['student_id']) ? intval($_GET['student_id']) : (isset($_POST['student_id']) ? intval($_POST['student_id']) : 0);
 
 // Get academic batches
-$batches = fetchAll("SELECT DISTINCT batch FROM students WHERE batch IS NOT NULL ORDER BY batch DESC");
+$batchesQuery = "SELECT DISTINCT batch FROM students WHERE batch IS NOT NULL";
+if ($currentSchoolId > 0) {
+    $batchesQuery .= " AND COALESCE(school_id, 0) = " . intval($currentSchoolId);
+}
+$batchesQuery .= " ORDER BY batch DESC";
+$batches = fetchAll($batchesQuery);
 
 // Get receipt books. The receipt book feature is optional, so keep this page
 // usable even on databases that have not run the receipt-book migration yet.
@@ -59,7 +69,18 @@ if ($studentId > 0) {
               LEFT JOIN classes c ON s.class_id = c.class_id
               LEFT JOIN sections sec ON s.section_id = sec.section_id
               WHERE s.student_id = ?";
-    $student = fetchOne($query, 'i', [$studentId]);
+    $studentParams = [$studentId];
+    $studentTypes = 'i';
+    if ($currentSchoolId > 0) {
+        $query .= " AND COALESCE(s.school_id, 0) = ?";
+        $studentParams[] = $currentSchoolId;
+        $studentTypes .= 'i';
+    }
+    $student = fetchOne($query, $studentTypes, $studentParams);
+
+    if (!$student) {
+        $studentId = 0;
+    }
 }
 
 // Get student's pending fees (from fee structure)
@@ -67,15 +88,20 @@ $pendingFees = [];
 $payableFees = [];
 if ($studentId > 0) {
     // Get fee structure
-    $feeStructure = fetchAll(
-        "SELECT fs.*, fh.fee_head_name, fh.fee_type
-         FROM fee_structure fs
-         JOIN fee_heads fh ON fs.fee_head_id = fh.fee_head_id
-         WHERE fs.student_id = ? AND fs.is_active = 1
-         ORDER BY fh.display_order",
-        'i',
-        [$studentId]
-    );
+    $feeStructureQuery = "SELECT fs.*, fh.fee_head_name, fh.fee_type
+                          FROM fee_structure fs
+                          JOIN fee_heads fh ON fs.fee_head_id = fh.fee_head_id
+                          WHERE fs.student_id = ? AND fs.is_active = 1";
+    $feeStructureParams = [$studentId];
+    $feeStructureTypes = 'i';
+    if ($currentSchoolId > 0) {
+        $feeStructureQuery .= " AND COALESCE(fs.school_id, 0) = ? AND COALESCE(fh.school_id, 0) = ?";
+        $feeStructureParams[] = $currentSchoolId;
+        $feeStructureParams[] = $currentSchoolId;
+        $feeStructureTypes .= 'ii';
+    }
+    $feeStructureQuery .= " ORDER BY fh.display_order";
+    $feeStructure = fetchAll($feeStructureQuery, $feeStructureTypes, $feeStructureParams);
 
     // Get already paid fees
     $paidFees = fetchAll(

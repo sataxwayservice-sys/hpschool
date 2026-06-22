@@ -41,6 +41,49 @@ include '../../includes/header.php';
     </div>
 </div>
 
+<!-- Dashboard Search -->
+<div class="row mb-4 no-print">
+    <div class="col-12">
+        <div class="card dashboard-card report-dashboard-search-card">
+            <div class="card-body">
+                <form id="reportDashboardSearchForm" class="row g-3 align-items-end">
+                    <div class="col-lg-10 col-md-9">
+                        <label for="reportDashboardSearchInput" class="form-label mb-1">Search Reports</label>
+                        <div class="student-autocomplete-host">
+                            <input
+                                type="search"
+                                class="form-control"
+                                id="reportDashboardSearchInput"
+                                name="q"
+                                placeholder="Search by report name, like attendance, fee, marks, admit card, certificate"
+                                value="<?php echo htmlspecialchars(trim((string)($_GET['q'] ?? ''))); ?>"
+                                autocomplete="off"
+                                aria-autocomplete="list"
+                                aria-expanded="false"
+                            >
+                            <div
+                                id="reportDashboardSuggestions"
+                                class="student-autocomplete-menu"
+                                role="listbox"
+                                aria-label="Report suggestions"
+                                style="display:none;"
+                            ></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-2 col-md-3 d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-search"></i> Search
+                        </button>
+                    </div>
+                </form>
+                <div id="reportDashboardNoResults" class="alert alert-warning mt-3 mb-0 no-print" style="display:none;">
+                    <i class="bi bi-search"></i> No reports matched your search.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Student Reports -->
 <div class="row mb-4">
     <div class="col-12">
@@ -50,7 +93,7 @@ include '../../includes/header.php';
             </div>
             <div class="card-body">
                 <div class="row">
-                    <div class="col-md-4 mb-3">
+                    <div class="col-md-3 mb-3">
                         <div class="card h-100 border-primary">
                             <div class="card-body text-center">
                                 <i class="bi bi-person-lines-fill text-primary" style="font-size: 48px;"></i>
@@ -62,7 +105,7 @@ include '../../includes/header.php';
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4 mb-3">
+                    <div class="col-md-3 mb-3">
                         <div class="card h-100 border-primary">
                             <div class="card-body text-center">
                                 <i class="bi bi-building text-primary" style="font-size: 48px;"></i>
@@ -74,13 +117,25 @@ include '../../includes/header.php';
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4 mb-3">
+                    <div class="col-md-3 mb-3">
                         <div class="card h-100 border-primary">
                             <div class="card-body text-center">
                                 <i class="bi bi-person-badge text-primary" style="font-size: 48px;"></i>
                                 <h5 class="mt-3">Student Details Report</h5>
                                 <p class="text-muted">Detailed student information with parents</p>
                                 <a href="student_details.php" class="btn btn-primary">
+                                    <i class="bi bi-download"></i> Generate Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card h-100 border-primary">
+                            <div class="card-body text-center">
+                                <i class="bi bi-calendar-check text-primary" style="font-size: 48px;"></i>
+                                <h5 class="mt-3">Attendance Report</h5>
+                                <p class="text-muted">Student-wise attendance summary with exports</p>
+                                <a href="attendance_report.php" class="btn btn-primary">
                                     <i class="bi bi-download"></i> Generate Report
                                 </a>
                             </div>
@@ -378,6 +433,264 @@ include '../../includes/header.php';
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('reportDashboardSearchForm');
+    const input = document.getElementById('reportDashboardSearchInput');
+    const noResults = document.getElementById('reportDashboardNoResults');
+    const suggestionsMenu = document.getElementById('reportDashboardSuggestions');
+    const cards = Array.from(document.querySelectorAll('.dashboard-card .card.h-100'));
+    const documentTiles = Array.from(document.querySelectorAll('.document-tile-grid .document-tile'));
+    const minLength = 2;
+    let debounceTimer = null;
+
+    function normalizeText(value) {
+        return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    }
+
+    function getContainer(element) {
+        return element.closest('.col-md-2, .col-md-3, .col-md-4, .col-md-6, .col-lg-2, .col-lg-3, .col-lg-4') || element.parentElement;
+    }
+
+    function hideSuggestions() {
+        if (!suggestionsMenu) {
+            return;
+        }
+
+        suggestionsMenu.innerHTML = '';
+        suggestionsMenu.style.display = 'none';
+        input.setAttribute('aria-expanded', 'false');
+    }
+
+    function collectSearchableItems() {
+        const items = [];
+        const seen = new Set();
+
+        cards.forEach((card) => {
+            const titleElement = card.querySelector('.card-body h5');
+            const linkElement = card.querySelector('a[href]');
+            if (!titleElement || !linkElement) {
+                return;
+            }
+
+            const title = titleElement.textContent.trim();
+            if (!title) {
+                return;
+            }
+
+            const sectionTitleElement = card.closest('.dashboard-card')?.querySelector('.card-header h5');
+            const sectionTitle = sectionTitleElement ? sectionTitleElement.textContent.trim() : '';
+            const descriptionElement = card.querySelector('p.text-muted');
+            const description = descriptionElement ? descriptionElement.textContent.trim() : '';
+            const key = 'card|' + title.toLowerCase() + '|' + sectionTitle.toLowerCase();
+
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+
+            items.push({
+                title: title,
+                meta: description || sectionTitle || 'Report',
+                text: normalizeText([title, description, sectionTitle, card.innerText].join(' ')),
+                container: getContainer(card)
+            });
+        });
+
+        documentTiles.forEach((tile) => {
+            const titleElement = tile.querySelector('h5');
+            const linkElement = tile.querySelector('a[href]');
+            if (!titleElement || !linkElement) {
+                return;
+            }
+
+            const title = titleElement.textContent.trim();
+            if (!title) {
+                return;
+            }
+
+            const sectionTitleElement = tile.closest('.dashboard-card')?.querySelector('.card-header h5');
+            const sectionTitle = sectionTitleElement ? sectionTitleElement.textContent.trim() : '';
+            const descriptionElement = tile.querySelector('p.text-muted');
+            const description = descriptionElement ? descriptionElement.textContent.trim() : '';
+            const key = 'tile|' + title.toLowerCase() + '|' + sectionTitle.toLowerCase();
+
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+
+            items.push({
+                title: title,
+                meta: description || sectionTitle || 'Report',
+                text: normalizeText([title, description, sectionTitle, tile.innerText].join(' ')),
+                container: tile
+            });
+        });
+
+        return items;
+    }
+
+    const searchableItems = collectSearchableItems();
+
+    function renderSuggestions(query) {
+        if (!suggestionsMenu) {
+            return;
+        }
+
+        const term = normalizeText(query);
+        if (term.length < minLength) {
+            hideSuggestions();
+            return;
+        }
+
+        const matches = searchableItems
+            .filter((item) => item.text.includes(term))
+            .sort((a, b) => {
+                const aStarts = a.title.toLowerCase().startsWith(term) ? 0 : 1;
+                const bStarts = b.title.toLowerCase().startsWith(term) ? 0 : 1;
+                if (aStarts !== bStarts) {
+                    return aStarts - bStarts;
+                }
+                return a.title.localeCompare(b.title);
+            })
+            .slice(0, 8);
+
+        suggestionsMenu.innerHTML = '';
+
+        if (!matches.length) {
+            hideSuggestions();
+            return;
+        }
+
+        matches.forEach((item) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'student-autocomplete-item';
+            button.setAttribute('role', 'option');
+
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'student-autocomplete-name';
+            titleSpan.textContent = item.title;
+
+            const metaSpan = document.createElement('span');
+            metaSpan.className = 'student-autocomplete-meta';
+            metaSpan.textContent = item.meta;
+
+            button.appendChild(titleSpan);
+            button.appendChild(metaSpan);
+
+            button.addEventListener('mousedown', function (event) {
+                event.preventDefault();
+                input.value = item.title;
+                hideSuggestions();
+                applyFilter();
+                if (item.container && typeof item.container.scrollIntoView === 'function') {
+                    item.container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            });
+
+            suggestionsMenu.appendChild(button);
+        });
+
+        suggestionsMenu.style.display = 'block';
+        input.setAttribute('aria-expanded', 'true');
+    }
+
+    function applyFilter() {
+        const query = (input.value || '').trim().toLowerCase();
+        let visibleCount = 0;
+
+        cards.forEach((card) => {
+            const container = getContainer(card);
+            const text = (card.innerText || '').toLowerCase();
+            const match = query === '' || text.includes(query);
+            if (container) {
+                container.style.display = match ? '' : 'none';
+            }
+            if (match) {
+                visibleCount++;
+            }
+        });
+
+        documentTiles.forEach((tile) => {
+            const text = (tile.innerText || '').toLowerCase();
+            const match = query === '' || text.includes(query);
+            tile.style.display = match ? '' : 'none';
+            if (match) {
+                visibleCount++;
+            }
+        });
+
+        if (noResults) {
+            noResults.style.display = visibleCount === 0 ? '' : 'none';
+        }
+    }
+
+    if (form && input) {
+        const params = new URLSearchParams(window.location.search);
+        const initialQuery = params.get('q');
+        if (initialQuery && !input.value) {
+            input.value = initialQuery;
+        }
+
+        input.addEventListener('input', function () {
+            if (debounceTimer) {
+                window.clearTimeout(debounceTimer);
+            }
+
+            debounceTimer = window.setTimeout(function () {
+                applyFilter();
+                renderSuggestions(input.value);
+            }, 120);
+        });
+
+        input.addEventListener('focus', function () {
+            renderSuggestions(input.value);
+        });
+
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                hideSuggestions();
+            }
+        });
+
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            applyFilter();
+            renderSuggestions(input.value);
+        });
+
+        if ((input.value || '').trim() !== '') {
+            applyFilter();
+            renderSuggestions(input.value);
+        }
+    }
+
+    document.addEventListener('click', function (event) {
+        if (!form.contains(event.target) && !suggestionsMenu.contains(event.target)) {
+            hideSuggestions();
+        }
+    });
+});
+</script>
+
+<style>
+.report-dashboard-search-card {
+    overflow: visible;
+    position: relative;
+    z-index: 50;
+}
+
+.report-dashboard-search-card .card-body {
+    overflow: visible;
+}
+
+#reportDashboardSuggestions {
+    z-index: 9999;
+}
+</style>
 
 <?php
 // Include footer
